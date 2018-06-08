@@ -1,0 +1,3 @@
+[submodule "include/cmath3d"]
+	path = include/cmath3d
+	url = https://github.com/jpreiss/cmath3d
