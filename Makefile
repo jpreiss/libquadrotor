@@ -1,6 +1,6 @@
-libquadtest: src/libquadrotorcontrol.c include/libquadrotorcontrol.h include/cmath3d/math3d.h
+libquadtest: src/*.c include/*.h
 	mkdir -p bin
-	gcc -std=c11 -Iinclude -Wdouble-promotion -DTEST -g -Wall -Wpedantic -o bin/libquadtest src/libquadrotorcontrol.c -lm
+	gcc -std=c11 -Iinclude -Wdouble-promotion -g -Wall -Wpedantic -o bin/libquadtest src/test.c -lm
 
 test: libquadtest
 	./bin/libquadtest

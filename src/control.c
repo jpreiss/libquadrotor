@@ -1,13 +1,13 @@
-#include "libquadrotorcontrol.h"
+#include "control.h"
 #include <math.h>
 
-static inline void integrate_clamp(vec_t *integral,
-	vec_t const *bound, vec_t const *value, float dt)
+static inline void integrate_clamp(struct vec *integral,
+	struct vec const *bound, struct vec const *value, float dt)
 {
 	*integral = vclampabs(vadd(*integral, vscl(dt, *value)), *bound);
 }
 
-static inline vec_t xy_zmul(struct xy_z xy_z, struct vec v)
+static inline struct vec xy_zmul(struct xy_z xy_z, struct vec v)
 {
 	return mkvec(xy_z.xy * v.x, xy_z.xy * v.y, xy_z.z * v.z);
 }
@@ -16,7 +16,7 @@ struct vec vee_map_rot_error(struct mat33 const *R, struct mat33 const *Rdes)
 {
 	struct mat33 R_transpose = mtranspose(*R);
 	struct mat33 Rdes_transpose = mtranspose(*Rdes);
-	struct mat33 eRM = msub(mmult(Rdes_transpose, *R), mmult(R_transpose, *Rdes));
+	struct mat33 eRM = msub(mmul(Rdes_transpose, *R), mmul(R_transpose, *Rdes));
 	struct vec eR = vscl(0.5, mkvec(eRM.m[2][1], eRM.m[0][2], eRM.m[1][0]));
 	return eR;
 }
@@ -37,10 +37,6 @@ struct vec vee_map_rot_error_quat2mat(struct quat const *quat, struct mat33 cons
 	eR.z = yb_des.x - 2*(y*(x*xb_des.x + y*yb_des.x - x*yb_des.y) + w*(x*xb_des.z + y*yb_des.z)) + 2*(-(xb_des.z*y) + w*(xb_des.x + yb_des.y) + x*yb_des.z)*z - 2*yb_des.x*fsqr(z) + xb_des.y*(-1 + 2*fsqr(x) + 2*fsqr(z));
 	return vscl(0.5, eR);
 }
-
-
-
-static float const GRAV = 9.81;
 
 void ctrl_SE3_default_params(struct ctrl_SE3_params *params)
 {
@@ -81,11 +77,11 @@ void ctrl_SE3_default_params(struct ctrl_SE3_params *params)
 	*params = p;
 }
 
-void physical_params_crazyflie2(struct quadrotor_physical_params *params)
+void physical_params_crazyflie2(struct quad_physical_params *params)
 {
 	// from "System Identification of the Crazyflie 2.0 Nano Quadrocopter".
 	// J. Foerster, M. Hamer, R. D'Andrea. Bachelor Thesis, ETH Zurich, 2015.
-	struct quadrotor_physical_params p = {
+	struct quad_physical_params p = {
 		.mass = 0.027f,
 		.arm_length = 0.046f,
 		.inertia = { 1.66e-5f, 1.66e-5f, 2.92e-5f },
@@ -105,22 +101,22 @@ void init_ctrl_SE3(struct ctrl_SE3_state *state)
 struct accel ctrl_SE3(
 	struct ctrl_SE3_state *state,
 	struct ctrl_SE3_params const *param,
-	struct state const *s, struct state const *set, float dt)
+	struct quad_state const *s, struct quad_state const *set, float dt)
 {
 	struct mat33 const R = quat2rotmat(s->quat);
 	struct accel output;
 
 	// -------------------- Linear part --------------------
-	vec_t const pos_error = vsub(set->pos, s->pos);
-	vec_t const vel_error = vsub(set->vel, s->vel);
+	struct vec const pos_error = vsub(set->pos, s->pos);
+	struct vec const vel_error = vsub(set->vel, s->vel);
 	integrate_clamp(&state->int_linear_err, &param->int_linear_bound, &pos_error, dt);
-	vec_t const target_acc = vadd4(
+	struct vec const target_acc = vadd4(
 		set->acc,
 		xy_zmul(param->linear.kp, pos_error),
 		xy_zmul(param->linear.ki, state->int_linear_err),
 		xy_zmul(param->linear.kd, vel_error)
 	);
-	vec_t const target_thrust = vadd(target_acc, mkvec(0.0f, 0.0f, GRAV));
+	struct vec const target_thrust = vadd(target_acc, mkvec(0.0f, 0.0f, GRAV));
 
 	struct vec const z_axis = mcolumn(R, 2);
 	output.linear = vdot(target_thrust, z_axis);
@@ -176,7 +172,7 @@ struct accel ctrl_attitude_rate(
 
 void power_distribute_quad(
 	struct accel const *acc,
-	struct quadrotor_physical_params const *params,
+	struct quad_physical_params const *params,
 	float prop_forces[4])
 {
 	struct vec const moment = veltmul(params->inertia, acc->angular);
