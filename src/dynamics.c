@@ -20,7 +20,7 @@ void quad_dynamics(
 		params->inertia
 	);
 	struct vec const omega = vadd(
-		vscl((1.0f - 0.1f * dt), omega), // TODO: make this a parameter
+		vscl((1.0f - 0.1f * dt), now->omega), // TODO: make this a parameter
 		vscl(dt, omega_dot)
 	);
 	next->quat = quat_gyro_update(now->quat, omega, dt);

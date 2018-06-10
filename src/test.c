@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 
@@ -37,6 +38,15 @@ void printvec(struct vec v)
 {
 	printf("(%f, %f, %f)", (double)v.x, (double)v.y, (double)v.z);
 }
+float randu(float low, float high)
+{
+	return low + (rand() / (float)RAND_MAX) * (high - low);
+}
+struct vec randvecbox(float low, float high)
+{
+	return mkvec(randu(low, high), randu(low, high), randu(low, high));
+}
+
 
 #define RESET "\x1b[0m"
 #define RED(str) "\x1b[31m" str RESET
@@ -221,8 +231,7 @@ void test_dynamics()
 
 	test("freefall");
 	{
-		struct quad_state now;
-		struct quad_state next;
+		struct quad_state now, next;
 		zero_state(&now);
 		struct accel force = { .linear = 0.0f, .angular = vzero() };
 		for (int i = 0; i < HZ; ++i) {
@@ -235,8 +244,7 @@ void test_dynamics()
 
 	test("hover");
 	{
-		struct quad_state now;
-		struct quad_state next;
+		struct quad_state now, next;
 		zero_state(&now);
 		struct accel force = { .linear = grav_comp, .angular = vzero() };
 		for (int i = 0; i < HZ; ++i) {
@@ -248,8 +256,7 @@ void test_dynamics()
 
 	test("freefall rotations");
 	{
-		struct quad_state now;
-		struct quad_state next;
+		struct quad_state now, next;
 		struct accel force = { .linear = 0.0f, .angular = vzero() };
 		// TODO: union-ize struct vec to allow?
 		float const *inertia_arr = (float const *)&param.inertia;
@@ -272,6 +279,54 @@ void test_dynamics()
 	}
 }
 
+// use the controller and the dynamics in a loop.
+void test_closedloop()
+{
+	int const HZ = 100;
+	float const dt = 1.0f / HZ;
+	struct quad_physical_params param;
+	physical_params_crazyflie2(&param);
+	struct ctrl_SE3_params ctrl_params;
+	ctrl_SE3_default_params(&ctrl_params);
+
+	test("hover attitude correction");
+	{
+		srand(100);
+		struct ctrl_SE3_state ctrl_state;
+		struct quad_state now, next, goal;
+		zero_state(&goal);
+
+		for (int i = 0; i < 100; ++i) {
+			zero_state(&now);
+			init_ctrl_SE3(&ctrl_state);
+
+			// no, this is not uniformly distributed on the sphere
+			struct vec const axis = vnormalize(randvecbox(-1.0, 1.0));
+			float const angle = randu(-0.5, 0.5);
+
+			now.quat = qaxisangle(axis, angle);
+			now.omega = randvecbox(-0.5, 0.5);
+
+			for (int t = 0; t < 100; ++t) {
+				struct accel acc = ctrl_SE3(
+					&ctrl_state, &ctrl_params, &now, &goal, dt);
+				// assume the control is perfectly realized.
+				// TODO: motor clipping & possibly motor inertia simulation.
+				if (acc.linear < 0.0f) acc.linear = 0.0f;
+				acc.linear *= param.mass;
+				acc.angular = veltmul(acc.angular, param.inertia);
+				quad_dynamics(&param, &now, &acc, dt, &next);
+				now = next;
+			}
+
+			float const pos_err = vmag(vsub(now.pos, goal.pos));
+			assert(pos_err < 0.05f);
+			float const angle_err = degrees(qanglebetween(now.quat, goal.quat));
+			assert(angle_err < 5.0f);
+		}
+	}
+}
+
 static void sigabort(int unused)
 {
 	puts(hrule);
@@ -289,6 +344,7 @@ int main()
 
 	test_control();
 	test_dynamics();
+	test_closedloop();
 
 	test("dummy");
 	puts(hrule);

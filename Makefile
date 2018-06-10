@@ -5,5 +5,5 @@ libquadtest: src/*.c include/*.h
 test: libquadtest
 	./bin/libquadtest
 
-debug:
+debug: libquadtest
 	gdb -tui ./bin/libquadtest
