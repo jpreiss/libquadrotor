@@ -39,6 +39,7 @@ struct quad_physical_params
 	float arm_length; // length of one arm. m
 	struct vec inertia; // diagonal of axis-aligned ineria matrix. kg * m^2
 	float thrust_to_torque; // property of the propeller. torque = this * thrust.
+	float max_thrust; // max thrust per motor in newtons
 	float drag; // constant c such that drag force is -c * |v|^2 * \hat{v}
 	            // TODO: non-isotropic drag? angular drag?
 
@@ -50,3 +51,7 @@ struct quad_physical_params
 	char motor_layout;
 	bool motor_0_ccw;
 };
+
+// Notes on indentifying quad_physical_params:
+// - if thrust-to-weight ratio of quadrotor is known, then:
+//   thrust_max = GRAV * t/w * mass / 4

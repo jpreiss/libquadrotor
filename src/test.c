@@ -168,7 +168,7 @@ void test_control()
 		assert(vclose(eR, mkvec(0, 0, -1)));
 	}
 
-	test("power distribution");
+	test("power dist basic");
 	{
 		struct quad_physical_params params;
 		physical_params_crazyflie2(&params);
@@ -218,6 +218,46 @@ void test_control()
 		assert(motors[1] > grav_comp_thrust);
 		assert(motors[2] > grav_comp_thrust);
 		assert(motors[3] < grav_comp_thrust);
+	}
+
+	test("power dist limits");
+	{
+		struct quad_physical_params params;
+		physical_params_crazyflie2(&params);
+		float motors[4];
+
+		// high side clipping - request too high thrust
+		struct accel acc = { .linear = 10.0f * GRAV, .angular = vzero() };
+		power_distribute_quad(&acc, &params, motors);
+		for (int i = 1; i < 4; i++) {
+			assert(motors[i] == params.max_thrust);
+		}
+
+		// low side clipping - request negative thrust
+		// (TODO: should this even be considered valid input?)
+		acc.linear = -GRAV;
+		power_distribute_quad(&acc, &params, motors);
+		for (int i = 1; i < 4; i++) {
+			assert(motors[i] == 0.0f);
+		}
+
+		// roll hard
+		acc.linear = GRAV;
+		acc.angular = mkvec(1e5f, 0, 0);
+		power_distribute_quad(&acc, &params, motors);
+		assert(motors[0] == params.max_thrust);
+		assert(motors[1] == 0.0f);
+		assert(motors[2] == 0.0f);
+		assert(motors[3] == params.max_thrust);
+
+		// pitch hard
+		acc.linear = GRAV;
+		acc.angular = mkvec(0, 1e5f, 0);
+		power_distribute_quad(&acc, &params, motors);
+		assert(motors[0] == 0.0f);
+		assert(motors[1] == 0.0f);
+		assert(motors[2] == params.max_thrust);
+		assert(motors[3] == params.max_thrust);
 	}
 }
 
@@ -296,7 +336,8 @@ void test_closedloop()
 		struct quad_state now, next, goal;
 		zero_state(&goal);
 
-		for (int i = 0; i < 100; ++i) {
+		int const TRIALS = 100;
+		for (int i = 0; i < TRIALS; ++i) {
 			zero_state(&now);
 			init_ctrl_SE3(&ctrl_state);
 
@@ -334,7 +375,8 @@ void test_closedloop()
 		struct quad_state now, next, goal;
 		zero_state(&goal);
 
-		for (int i = 0; i < 100; ++i) {
+		int const TRIALS = 100;
+		for (int i = 0; i < TRIALS; ++i) {
 			zero_state(&now);
 			init_ctrl_SE3(&ctrl_state);
 

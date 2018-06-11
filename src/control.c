@@ -85,7 +85,9 @@ void physical_params_crazyflie2(struct quad_physical_params *params)
 		.mass = 0.027f,
 		.arm_length = 0.046f,
 		.inertia = { 1.66e-5f, 1.66e-5f, 2.92e-5f },
-		.thrust_to_torque = 0.006,
+		.thrust_to_torque = 0.006f,
+		.max_thrust = 0.15f,
+		.drag = 0.0f, // TODO
 		.motor_layout = 'x',
 		.motor_0_ccw = true, // TODO
 	};
@@ -194,6 +196,10 @@ void power_distribute_quad(
 		prop_forces[1] = thrustpart - moment_scl.x - yawpart;
 		prop_forces[2] = thrustpart + moment_scl.y + yawpart;
 		prop_forces[3] = thrustpart + moment_scl.x - yawpart;
+	}
+
+	for (int i = 0; i < 4; ++i) {
+		prop_forces[i] = clamp(prop_forces[i], 0.0f, params->max_thrust);
 	}
 }
 
