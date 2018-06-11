@@ -301,13 +301,14 @@ void test_closedloop()
 			init_ctrl_SE3(&ctrl_state);
 
 			// no, this is not uniformly distributed on the sphere
+			float const max_angle = radians(60.0);
 			struct vec const axis = vnormalize(randvecbox(-1.0, 1.0));
-			float const angle = randu(-0.5, 0.5);
+			float const angle = randu(-max_angle, max_angle);
 
 			now.quat = qaxisangle(axis, angle);
 			now.omega = randvecbox(-0.5, 0.5);
 
-			for (int t = 0; t < 100; ++t) {
+			for (int t = 0; t < 200; ++t) {
 				struct accel acc = ctrl_SE3(
 					&ctrl_state, &ctrl_params, &now, &goal, dt);
 				// assume the control is perfectly realized.
@@ -321,6 +322,45 @@ void test_closedloop()
 
 			float const pos_err = vmag(vsub(now.pos, goal.pos));
 			assert(pos_err < 0.05f);
+			float const angle_err = degrees(qanglebetween(now.quat, goal.quat));
+			assert(angle_err < 5.0f);
+		}
+	}
+
+	test("hover position correction");
+	{
+		srand(100);
+		struct ctrl_SE3_state ctrl_state;
+		struct quad_state now, next, goal;
+		zero_state(&goal);
+
+		for (int i = 0; i < 100; ++i) {
+			zero_state(&now);
+			init_ctrl_SE3(&ctrl_state);
+
+			struct vec const axis = vnormalize(randvecbox(-1.0, 1.0));
+			float const angle = randu(-0.9, 0.9);
+			now.quat = qaxisangle(axis, angle);
+			now.omega = randvecbox(-0.5, 0.5);
+
+			now.pos = randvecbox(-0.5, 0.5);
+			now.vel = randvecbox(-0.5, 0.5);
+
+			for (int t = 0; t < 500; ++t) {
+				struct accel acc = ctrl_SE3(
+					&ctrl_state, &ctrl_params, &now, &goal, dt);
+				// assume the control is perfectly realized.
+				// TODO: motor clipping & possibly motor inertia simulation.
+				if (acc.linear < 0.0f) acc.linear = 0.0f;
+				acc.linear *= param.mass;
+				acc.angular = veltmul(acc.angular, param.inertia);
+				quad_dynamics(&param, &now, &acc, dt, &next);
+				now = next;
+			}
+
+			float const pos_err = vmag(vsub(now.pos, goal.pos));
+			assert(pos_err < 0.03f);
+			assert(vmag(now.vel) < 0.01f);
 			float const angle_err = degrees(qanglebetween(now.quat, goal.quat));
 			assert(angle_err < 5.0f);
 		}
