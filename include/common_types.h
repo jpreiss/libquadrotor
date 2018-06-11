@@ -4,7 +4,8 @@
 
 float const GRAV = 9.81;
 
-// this is used for both setpoint and state estimate inputs.
+// the mutable physical state of the quadrotor.
+// this is used for both setpoints/goals and actual states.
 struct quad_state
 {
 	struct vec pos;

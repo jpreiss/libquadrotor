@@ -13,27 +13,21 @@
 #include <string.h>
 
 
-bool close(float a, float b)
+bool closeeps(float a, float b, float eps)
 {
 	double const big = fabs(a) > fabs(b) ? fabs(a) : fabs(b);
 	double denom = big > 0.001 ? big : 1.0;
-	return fabs((double)a - (double)b) / denom < 0.000001;
+	return fabs((double)a - (double)b) / denom < (double)eps;
 }
-bool vclose(struct vec a, struct vec b)
+
+bool vcloseeps(struct vec a, struct vec b, float eps)
 {
-	return close(a.x, b.x) && close(a.y, b.y) && close(a.z, b.z);
-	/*
-	if (!(close(a.x, b.x) && close(a.y, b.y) && close(a.z, b.z))) {
-		puts("a =");
-		printvec(a);
-		puts("\nb =");
-		printvec(b);
-		puts("");
-		return false;
-	}
-	return true;
-	*/
+	return closeeps(a.x, b.x, eps) && closeeps(a.y, b.y, eps) && closeeps(a.z, b.z, eps);
 }
+
+bool close(float a, float b) { return closeeps(a, b, 1e-6f); }
+bool vclose(struct vec a, struct vec b) { return vcloseeps(a, b, 1e-6f); }
+
 void printvec(struct vec v)
 {
 	printf("(%f, %f, %f)", (double)v.x, (double)v.y, (double)v.z);
@@ -57,7 +51,7 @@ static char const *testname = NULL;
 void test(char const *name)
 {
 	if (testname != NULL) {
-		printf("%20s: " GREEN("passed") "\n", testname);
+		printf("%30s: " GREEN("passed") "\n", testname);
 	}
 	testname = name;
 }
@@ -167,7 +161,10 @@ void test_control()
 		eR = vee_map_rot_error_quat2mat(&q, &Rdes);
 		assert(vclose(eR, mkvec(0, 0, -1)));
 	}
+}
 
+void test_powerdist()
+{
 	test("power dist basic");
 	{
 		struct quad_physical_params params;
@@ -258,6 +255,79 @@ void test_control()
 		assert(motors[1] == 0.0f);
 		assert(motors[2] == params.max_thrust);
 		assert(motors[3] == params.max_thrust);
+	}
+
+	test("motors to moment/thrust");
+	{
+		struct quad_physical_params param;
+		physical_params_crazyflie2(&param);
+		struct accel force;
+		float motors[4];
+
+		float const grav_comp = (GRAV * param.mass / 4.0f);
+
+		// hovering
+		motors[0] = motors[1] = motors[2] = motors[3] = grav_comp;
+		quad_motor_forces(&param, motors, &force);
+		assert(close(force.linear, GRAV * param.mass));
+		assert(vclose(force.angular, vzero()));
+
+		// rolling
+		motors[0] = motors[3] = 1.1f * grav_comp;
+		motors[1] = motors[2] = 0.9f * grav_comp;
+		quad_motor_forces(&param, motors, &force);
+		assert(close(force.linear, GRAV * param.mass));
+		assert(force.angular.x > 0.0001f); // TODO exact amount
+		assert(close(force.angular.y, 0.0f));
+		assert(close(force.angular.z, 0.0f));
+
+		// pitching
+		motors[0] = motors[1] = 0.9f * grav_comp;
+		motors[2] = motors[3] = 1.1f * grav_comp;
+		quad_motor_forces(&param, motors, &force);
+		assert(close(force.linear, GRAV * param.mass));
+		assert(close(force.angular.x, 0.0f));
+		assert(force.angular.y > 0.0001f); // TODO exact amount
+		assert(close(force.angular.z, 0.0f));
+
+		// yawing
+		motors[0] = motors[2] = 0.9f * grav_comp;
+		motors[1] = motors[3] = 1.1f * grav_comp;
+		quad_motor_forces(&param, motors, &force);
+		assert(close(force.linear, GRAV * param.mass));
+		assert(close(force.angular.x, 0.0f));
+		assert(close(force.angular.y, 0.0f));
+		assert(force.angular.z > 0.0001f); // TODO exact amount
+	}
+
+	test("power dist roundtrip");
+	{
+		struct quad_physical_params params;
+		physical_params_crazyflie2(&params);
+		float motors[4];
+		struct accel force;
+
+		// only test small forces/moments to avoid motor clipping
+		float const linear_range = 1.0f;
+		float const angular_range = 1.0f;
+
+		srand(100);
+		int const TRIALS = 100;
+		for (int i = 0; i < TRIALS; ++i) {
+			struct accel acc = {
+				.linear = GRAV + randu(-linear_range, linear_range),
+				.angular = randvecbox(-angular_range, angular_range)
+			};
+			power_distribute_quad(&acc, &params, motors);
+			quad_motor_forces(&params, motors, &force);
+
+			force.linear /= params.mass;
+			force.angular = veltdiv(force.angular, params.inertia);
+			assert(close(force.linear, acc.linear));
+			// TODO: figure out why a lot of precision is being lost here.
+			// I would hope we can get better than 1e-2f.
+			assert(vcloseeps(force.angular, acc.angular, 1e-2f));
+		}
 	}
 }
 
@@ -425,6 +495,7 @@ int main()
 	puts(hrule);
 
 	test_control();
+	test_powerdist();
 	test_dynamics();
 	test_closedloop();
 

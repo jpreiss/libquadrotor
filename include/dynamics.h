@@ -16,4 +16,4 @@ void quad_dynamics(
 void quad_motor_forces(
 	struct quad_physical_params const *params,
 	float const motors[4],
-	struct accel *acc);
+	struct accel *force);

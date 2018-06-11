@@ -45,3 +45,28 @@ void quad_dynamics(
 	next->acc = acc;
 }
 
+
+// note: this computes the actual moment and thrust,
+// not the acc + gravity and angular acceleration that the controllers output
+void quad_motor_forces(
+	struct quad_physical_params const *params,
+	float const motors[4],
+	struct accel *force)
+{
+	force->linear = motors[0] + motors[1] + motors[2] + motors[3];
+
+	if (params->motor_layout == 'x') {
+		float const arm = 0.707106781f * params->arm_length;
+		force->angular.x = arm * (motors[0] - motors[1] - motors[2] + motors[3]);
+		force->angular.y = arm * (-motors[0] - motors[1] + motors[2] + motors[3]);
+	}
+	else {
+		float const arm = params->arm_length;
+		force->angular.x = arm * (-motors[1] + motors[3]);
+		force->angular.y = arm * (-motors[0] + motors[2]);
+	}
+
+	float const yawscl =
+		params->thrust_to_torque * (params->motor_0_ccw ? -1.0f : 1.0f);
+	force->angular.z = yawscl * (motors[0] - motors[1] + motors[2] - motors[3]);
+}
