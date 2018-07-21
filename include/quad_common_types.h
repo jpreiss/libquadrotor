@@ -2,7 +2,7 @@
 
 #include "cmath3d/math3d.h"
 
-float const GRAV = 9.81;
+static float const GRAV = 9.81;
 
 // the mutable physical state of the quadrotor.
 // this is used for both setpoints/goals and actual states.
