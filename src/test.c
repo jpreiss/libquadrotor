@@ -58,38 +58,38 @@ void test(char const *name)
 
 void test_control()
 {
-	struct ctrl_SE3_params params;
-	ctrl_SE3_default_params(&params);
+	struct quad_ctrl_SE3_params params;
+	quad_ctrl_SE3_default_params(&params);
 	struct quad_state zero;
-	zero_state(&zero);
+	quad_zero_state(&zero);
 	float const dt = 0.01;
 
 	test("go straight up");
 	{
-		struct ctrl_SE3_state ctrlstate;
-		init_ctrl_SE3(&ctrlstate);
+		struct quad_ctrl_SE3_state ctrlstate;
+		quad_ctrl_SE3_init(&ctrlstate);
 		struct quad_state s = zero, set = zero;
 		set.pos = mkvec(0.0f, 0.0f, 1.0f);
-		struct accel acc = ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
+		struct quad_accel acc = quad_ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
 		assert(vclose(acc.angular, vzero()));
 		assert(acc.linear > params.linear.kp.z / 2.0f);
 	}
 
 	test("go forward");
 	{
-		struct ctrl_SE3_state ctrlstate;
-		init_ctrl_SE3(&ctrlstate);
+		struct quad_ctrl_SE3_state ctrlstate;
+		quad_ctrl_SE3_init(&ctrlstate);
 		struct quad_state s = zero, set = zero;
 		set.pos = mkvec(1.0f, 0.0f, 0.0f);
-		struct accel acc = ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
+		struct quad_accel acc = quad_ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
 		assert(close(acc.angular.x, 0.0f));
 		assert(acc.angular.y > 0.0001f);
 		assert(close(acc.angular.z, 0.0f));
 		assert(close(acc.linear, GRAV)); // it should be dotted with the current up vec
 
-		init_ctrl_SE3(&ctrlstate);
+		quad_ctrl_SE3_init(&ctrlstate);
 		s.quat = qaxisangle(mkvec(0,1,0), 0.1); // rotate a little bit towards goal
-		acc = ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
+		acc = quad_ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
 		assert(close(acc.angular.x, 0.0f));
 		assert(close(acc.angular.z, 0.0f));
 		assert(acc.linear > GRAV + 1.0f); // now, we should want to hold alt and move
@@ -97,11 +97,11 @@ void test_control()
 
 	test("go left");
 	{
-		struct ctrl_SE3_state ctrlstate;
-		init_ctrl_SE3(&ctrlstate);
+		struct quad_ctrl_SE3_state ctrlstate;
+		quad_ctrl_SE3_init(&ctrlstate);
 		struct quad_state s = zero, set = zero;
 		set.pos = mkvec(0.0f, 1.0f, 0.0f);
-		struct accel acc = ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
+		struct quad_accel acc = quad_ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
 		assert(acc.angular.x < -0.0001f);
 		assert(close(acc.angular.y, 0.0f));
 		assert(close(acc.angular.z, 0.0f));
@@ -110,11 +110,11 @@ void test_control()
 
 	test("yaw at hover");
 	{
-		struct ctrl_SE3_state ctrlstate;
-		init_ctrl_SE3(&ctrlstate);
+		struct quad_ctrl_SE3_state ctrlstate;
+		quad_ctrl_SE3_init(&ctrlstate);
 		struct quad_state s = zero, set = zero;
 		set.quat = qaxisangle(mkvec(0,0,1), radians(90));
-		struct accel acc = ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
+		struct quad_accel acc = quad_ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
 		assert(close(acc.angular.z, params.attitude.kp.z));
 		assert(close(acc.angular.x, 0));
 		assert(close(acc.angular.y, 0));
@@ -172,15 +172,15 @@ void test_powerdist()
 		float motors[4];
 
 		// free fall sanity check
-		struct accel acc = { .linear = 0.0f, .angular = { 0.0f, 0.0f, 0.0f }};
-		power_distribute_quad(&acc, &params, motors);
+		struct quad_accel acc = { .linear = 0.0f, .angular = { 0.0f, 0.0f, 0.0f }};
+		quad_power_distribute(&acc, &params, motors);
 		for (int i = 1; i < 4; i++) {
 			assert(close(motors[i], 0.0f));
 		}
 
 		// hover - total force should be exactly gravity compensation
 		acc.linear = GRAV;
-		power_distribute_quad(&acc, &params, motors);
+		quad_power_distribute(&acc, &params, motors);
 		float const tot = motors[0] + motors[1] + motors[2] + motors[3];
 		assert(close(tot, GRAV * params.mass));
 		for (int i = 1; i < 4; i++) {
@@ -191,7 +191,7 @@ void test_powerdist()
 
 		// yaw CCW
 		acc.angular.z = 1.0f;
-		power_distribute_quad(&acc, &params, motors);
+		quad_power_distribute(&acc, &params, motors);
 		float const grav_comp_thrust = tot / 4.0f; // `tot` from previous test
 		assert(params.motor_0_ccw);
 		// motor exerts opposite reaction torque on body
@@ -202,7 +202,7 @@ void test_powerdist()
 
 		// pitch forward
 		acc.angular = mkvec(0.0f, 1.0f, 0.0f);
-		power_distribute_quad(&acc, &params, motors);
+		quad_power_distribute(&acc, &params, motors);
 		assert(motors[0] < grav_comp_thrust);
 		assert(motors[1] < grav_comp_thrust);
 		assert(motors[2] > grav_comp_thrust);
@@ -210,7 +210,7 @@ void test_powerdist()
 
 		// roll left
 		acc.angular = mkvec(-1.0f, 0.0f, 0.0f);
-		power_distribute_quad(&acc, &params, motors);
+		quad_power_distribute(&acc, &params, motors);
 		assert(motors[0] < grav_comp_thrust);
 		assert(motors[1] > grav_comp_thrust);
 		assert(motors[2] > grav_comp_thrust);
@@ -224,8 +224,8 @@ void test_powerdist()
 		float motors[4];
 
 		// high side clipping - request too high thrust
-		struct accel acc = { .linear = 10.0f * GRAV, .angular = vzero() };
-		power_distribute_quad(&acc, &params, motors);
+		struct quad_accel acc = { .linear = 10.0f * GRAV, .angular = vzero() };
+		quad_power_distribute(&acc, &params, motors);
 		for (int i = 1; i < 4; i++) {
 			assert(motors[i] == params.max_thrust);
 		}
@@ -233,7 +233,7 @@ void test_powerdist()
 		// low side clipping - request negative thrust
 		// (TODO: should this even be considered valid input?)
 		acc.linear = -GRAV;
-		power_distribute_quad(&acc, &params, motors);
+		quad_power_distribute(&acc, &params, motors);
 		for (int i = 1; i < 4; i++) {
 			assert(motors[i] == 0.0f);
 		}
@@ -241,7 +241,7 @@ void test_powerdist()
 		// roll hard
 		acc.linear = GRAV;
 		acc.angular = mkvec(1e5f, 0, 0);
-		power_distribute_quad(&acc, &params, motors);
+		quad_power_distribute(&acc, &params, motors);
 		assert(motors[0] == params.max_thrust);
 		assert(motors[1] == 0.0f);
 		assert(motors[2] == 0.0f);
@@ -250,7 +250,7 @@ void test_powerdist()
 		// pitch hard
 		acc.linear = GRAV;
 		acc.angular = mkvec(0, 1e5f, 0);
-		power_distribute_quad(&acc, &params, motors);
+		quad_power_distribute(&acc, &params, motors);
 		assert(motors[0] == 0.0f);
 		assert(motors[1] == 0.0f);
 		assert(motors[2] == params.max_thrust);
@@ -261,7 +261,7 @@ void test_powerdist()
 	{
 		struct quad_physical_params param;
 		physical_params_crazyflie2(&param);
-		struct accel force;
+		struct quad_accel force;
 		float motors[4];
 
 		float const grav_comp = (GRAV * param.mass / 4.0f);
@@ -305,7 +305,7 @@ void test_powerdist()
 		struct quad_physical_params params;
 		physical_params_crazyflie2(&params);
 		float motors[4];
-		struct accel force;
+		struct quad_accel force;
 
 		// only test small forces/moments to avoid motor clipping
 		float const linear_range = 1.0f;
@@ -314,11 +314,11 @@ void test_powerdist()
 		srand(100);
 		int const TRIALS = 100;
 		for (int i = 0; i < TRIALS; ++i) {
-			struct accel acc = {
+			struct quad_accel acc = {
 				.linear = GRAV + randu(-linear_range, linear_range),
 				.angular = randvecbox(-angular_range, angular_range)
 			};
-			power_distribute_quad(&acc, &params, motors);
+			quad_power_distribute(&acc, &params, motors);
 			quad_motor_forces(&params, motors, &force);
 
 			force.linear /= params.mass;
@@ -342,8 +342,8 @@ void test_dynamics()
 	test("freefall");
 	{
 		struct quad_state now, next;
-		zero_state(&now);
-		struct accel force = { .linear = 0.0f, .angular = vzero() };
+		quad_zero_state(&now);
+		struct quad_accel force = { .linear = 0.0f, .angular = vzero() };
 		for (int i = 0; i < HZ; ++i) {
 			quad_dynamics(&param, &now, &force, dt, &next);
 			now = next;
@@ -355,8 +355,8 @@ void test_dynamics()
 	test("hover");
 	{
 		struct quad_state now, next;
-		zero_state(&now);
-		struct accel force = { .linear = grav_comp, .angular = vzero() };
+		quad_zero_state(&now);
+		struct quad_accel force = { .linear = grav_comp, .angular = vzero() };
 		for (int i = 0; i < HZ; ++i) {
 			quad_dynamics(&param, &now, &force, dt, &next);
 			now = next;
@@ -367,13 +367,13 @@ void test_dynamics()
 	test("freefall rotations");
 	{
 		struct quad_state now, next;
-		struct accel force = { .linear = 0.0f, .angular = vzero() };
+		struct quad_accel force = { .linear = 0.0f, .angular = vzero() };
 		// TODO: union-ize struct vec to allow?
 		float const *inertia_arr = (float const *)&param.inertia;
 		float *moment_arr = (float *)&force.angular;
 
 		for (int axis = 0; axis < 2; ++axis) {
-			zero_state(&now);
+			quad_zero_state(&now);
 			force.angular = vzero();
 			moment_arr[axis] = M_PI_F * inertia_arr[axis];
 			for (int i = 0; i < HZ; ++i) {
@@ -396,20 +396,20 @@ void test_closedloop()
 	float const dt = 1.0f / HZ;
 	struct quad_physical_params param;
 	physical_params_crazyflie2(&param);
-	struct ctrl_SE3_params ctrl_params;
-	ctrl_SE3_default_params(&ctrl_params);
+	struct quad_ctrl_SE3_params ctrl_params;
+	quad_ctrl_SE3_default_params(&ctrl_params);
 
 	test("hover attitude correction");
 	{
 		srand(100);
-		struct ctrl_SE3_state ctrl_state;
+		struct quad_ctrl_SE3_state ctrl_state;
 		struct quad_state now, next, goal;
-		zero_state(&goal);
+		quad_zero_state(&goal);
 
 		int const TRIALS = 100;
 		for (int i = 0; i < TRIALS; ++i) {
-			zero_state(&now);
-			init_ctrl_SE3(&ctrl_state);
+			quad_zero_state(&now);
+			quad_ctrl_SE3_init(&ctrl_state);
 
 			// no, this is not uniformly distributed on the sphere
 			float const max_angle = radians(60.0);
@@ -420,7 +420,7 @@ void test_closedloop()
 			now.omega = randvecbox(-0.5, 0.5);
 
 			for (int t = 0; t < 200; ++t) {
-				struct accel acc = ctrl_SE3(
+				struct quad_accel acc = quad_ctrl_SE3(
 					&ctrl_state, &ctrl_params, &now, &goal, dt);
 				// assume the control is perfectly realized.
 				// TODO: motor clipping & possibly motor inertia simulation.
@@ -441,14 +441,14 @@ void test_closedloop()
 	test("hover position correction");
 	{
 		srand(100);
-		struct ctrl_SE3_state ctrl_state;
+		struct quad_ctrl_SE3_state ctrl_state;
 		struct quad_state now, next, goal;
-		zero_state(&goal);
+		quad_zero_state(&goal);
 
 		int const TRIALS = 100;
 		for (int i = 0; i < TRIALS; ++i) {
-			zero_state(&now);
-			init_ctrl_SE3(&ctrl_state);
+			quad_zero_state(&now);
+			quad_ctrl_SE3_init(&ctrl_state);
 
 			struct vec const axis = vnormalize(randvecbox(-1.0, 1.0));
 			float const angle = randu(-0.9, 0.9);
@@ -459,7 +459,7 @@ void test_closedloop()
 			now.vel = randvecbox(-0.5, 0.5);
 
 			for (int t = 0; t < 500; ++t) {
-				struct accel acc = ctrl_SE3(
+				struct quad_accel acc = quad_ctrl_SE3(
 					&ctrl_state, &ctrl_params, &now, &goal, dt);
 				// assume the control is perfectly realized.
 				// TODO: motor clipping & possibly motor inertia simulation.

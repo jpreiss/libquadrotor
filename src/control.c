@@ -38,9 +38,9 @@ struct vec vee_map_rot_error_quat2mat(struct quat const *quat, struct mat33 cons
 	return vscl(0.5, eR);
 }
 
-void ctrl_SE3_default_params(struct ctrl_SE3_params *params)
+void quad_ctrl_SE3_default_params(struct quad_ctrl_SE3_params *params)
 {
-	struct ctrl_SE3_params p = {
+	struct quad_ctrl_SE3_params p = {
 		.linear = {
 			.kp = {.xy = 12.5f, .z = 39.0f},
 			.ki = {.xy = 1.55f, .z = 1.55f},
@@ -94,19 +94,19 @@ void physical_params_crazyflie2(struct quad_physical_params *params)
 	*params = p;
 }
 
-void init_ctrl_SE3(struct ctrl_SE3_state *state)
+void quad_ctrl_SE3_init(struct quad_ctrl_SE3_state *state)
 {
 	state->int_linear_err = vzero();
 	state->int_omega_err = vzero();
 }
 
-struct accel ctrl_SE3(
-	struct ctrl_SE3_state *state,
-	struct ctrl_SE3_params const *param,
+struct quad_accel quad_ctrl_SE3(
+	struct quad_ctrl_SE3_state *state,
+	struct quad_ctrl_SE3_params const *param,
 	struct quad_state const *s, struct quad_state const *set, float dt)
 {
 	struct mat33 const R = quat2rotmat(s->quat);
-	struct accel output;
+	struct quad_accel output;
 
 	// -------------------- Linear part --------------------
 	struct vec const pos_error = vsub(set->pos, s->pos);
@@ -153,12 +153,12 @@ struct accel ctrl_SE3(
 	return output;
 }
 
-struct accel ctrl_attitude_rate(
-	struct ctrl_attitude_rate_state *state,
-	struct ctrl_attitude_rate_params const *param,
+struct quad_accel quad_ctrl_attitude_rate(
+	struct quad_ctrl_attitude_rate_state *state,
+	struct quad_ctrl_attitude_rate_params const *param,
 	struct vec s, struct vec set, float thrust, float dt)
 {
-	struct accel output;
+	struct quad_accel output;
 
 	struct vec const omega_error = vsub(set, s);
 	integrate_clamp(&state->int_omega_err, &param->int_omega_bound, &omega_error, dt);
@@ -172,8 +172,8 @@ struct accel ctrl_attitude_rate(
 	return output;
 }
 
-void power_distribute_quad(
-	struct accel const *acc,
+void quad_power_distribute(
+	struct quad_accel const *acc,
 	struct quad_physical_params const *params,
 	float prop_forces[4])
 {

@@ -4,7 +4,7 @@
 void quad_dynamics(
 	struct quad_physical_params const *params,
 	struct quad_state const *now,
-	struct accel const *force,
+	struct quad_accel const *force,
 	float const dt,
 	struct quad_state *next)
 {
@@ -51,7 +51,7 @@ void quad_dynamics(
 void quad_motor_forces(
 	struct quad_physical_params const *params,
 	float const motors[4],
-	struct accel *force)
+	struct quad_accel *force)
 {
 	force->linear = motors[0] + motors[1] + motors[2] + motors[3];
 

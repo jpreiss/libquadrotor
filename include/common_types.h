@@ -16,7 +16,7 @@ struct quad_state
 	struct vec omega;
 	int ticks_since_qnormalize;
 };
-static inline void zero_state(struct quad_state *s)
+static inline void quad_zero_state(struct quad_state *s)
 {
 	s->pos = s->vel = s->acc = s->omega = vzero();
 	s->quat = qeye();
@@ -27,7 +27,7 @@ static inline void zero_state(struct quad_state *s)
 // and the angular acceleration.
 // the boundary between controller and power distribution.
 // also the quantities that drive the dynamics simulation.
-struct accel
+struct quad_accel
 {
 	float linear;
 	struct vec angular;
