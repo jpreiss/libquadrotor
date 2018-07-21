@@ -1,6 +1,6 @@
 libquadtest: src/*.c include/*.h
 	mkdir -p bin
-	gcc -std=c99 -Iinclude -Wdouble-promotion -g -Wall -Wpedantic -o bin/libquadtest src/test.c -lm
+	gcc -std=c99 -Iinclude -Wdouble-promotion -g -Wall -Wpedantic -o bin/libquadtest src/libquadrotor_test.c -lm
 
 test: libquadtest
 	./bin/libquadtest

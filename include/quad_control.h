@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cmath3d/math3d.h"
-#include "common_types.h"
+#include "quad_common_types.h"
 
 
 // in both position and attitude of a quadrotor, the third axis is "special".

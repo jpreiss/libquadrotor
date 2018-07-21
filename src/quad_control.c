@@ -1,4 +1,4 @@
-#include "control.h"
+#include "quad_control.h"
 #include <math.h>
 
 static inline void integrate_clamp(struct vec *integral,

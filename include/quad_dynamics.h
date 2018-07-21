@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common_types.h"
+#include "quad_common_types.h"
 
 // simulate the dynamics of the quadrotor.
 void quad_dynamics(

@@ -1,4 +1,4 @@
-#include "dynamics.h"
+#include "quad_dynamics.h"
 
 // simulate the dynamics of the quadrotor.
 void quad_dynamics(

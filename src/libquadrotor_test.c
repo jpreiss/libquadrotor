@@ -3,8 +3,8 @@
 // This makes it possible to test internal static functions
 // and lets us avoid dealing with object files at all.
 
-#include "control.c"
-#include "dynamics.c"
+#include "quad_control.c"
+#include "quad_dynamics.c"
 
 #include <assert.h>
 #include <signal.h>
