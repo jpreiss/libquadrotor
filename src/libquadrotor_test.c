@@ -610,7 +610,7 @@ void test_closedloop()
 			now.pos = randvecbox(-0.5, 0.5);
 			now.vel = randvecbox(-0.5, 0.5);
 
-			for (int t = 0; t < 500; ++t) {
+			for (int t = 0; t < 1000; ++t) {
 				struct quad_accel acc = quad_ctrl_SE3(
 					&ctrl_state, &ctrl_params, &now, &goal, dt);
 				// assume the control is perfectly realized.
