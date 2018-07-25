@@ -40,6 +40,10 @@ struct vec randvecbox(float low, float high)
 {
 	return mkvec(randu(low, high), randu(low, high), randu(low, high));
 }
+struct quat randquat()
+{
+	return qnormalize(mkquat(randu(0,1), randu(0,1), randu(0,1), randu(0,1)));
+}
 
 
 #define RESET "\x1b[0m"
@@ -56,7 +60,7 @@ void test(char const *name)
 	testname = name;
 }
 
-void test_control()
+void test_SE3_control()
 {
 	struct quad_ctrl_SE3_params params;
 	quad_ctrl_SE3_default_params(&params);
@@ -160,6 +164,154 @@ void test_control()
 		Rdes = mcolumns(mkvec(0,1,0), mkvec(-1,0,0), mkvec(0,0,1));
 		eR = vee_map_rot_error_quat2mat(&q, &Rdes);
 		assert(vclose(eR, mkvec(0, 0, -1)));
+	}
+}
+
+void test_quaternion_control()
+{
+	struct quad_ctrl_attitude_params params;
+	quad_ctrl_attitude_default_params(&params);
+	struct quad_state zero;
+	quad_zero_state(&zero);
+	float const dt = 0.01;
+
+	test("quat ctrl hover");
+	{
+		struct quad_ctrl_attitude_state ctrlstate;
+		quad_ctrl_attitude_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		float thrust = 0.0f;
+
+		struct quad_accel accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(vclose(accel.angular, vzero()));
+	}
+
+	test("quat ctrl roll");
+	{
+		struct quad_ctrl_attitude_state ctrlstate;
+		quad_ctrl_attitude_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		set.quat = qaxisangle(mkvec(1,0,0), M_PI_2_F);
+		float thrust = 0.0f;
+
+		struct quad_accel accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(accel.angular.x > 1e-4);
+		assert(close(accel.angular.y, 0.0f));
+		assert(close(accel.angular.z, 0.0f));
+	}
+
+	float pitch_90deg_omega;
+	test("quat ctrl pitch");
+	{
+		struct quad_ctrl_attitude_state ctrlstate;
+		quad_ctrl_attitude_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		set.quat = qaxisangle(mkvec(0,1,0), M_PI_2_F);
+		float thrust = 0.0f;
+
+		struct quad_accel accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(close(accel.angular.x, 0.0f));
+		assert(accel.angular.y > 1e-4);
+		assert(close(accel.angular.z, 0.0f));
+		pitch_90deg_omega = accel.angular.y;
+	}
+
+	test("quat ctrl yaw");
+	{
+		struct quad_ctrl_attitude_state ctrlstate;
+		quad_ctrl_attitude_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		set.quat = qaxisangle(mkvec(0,0,1), M_PI_2_F);
+		float thrust = 0.0f;
+
+		struct quad_accel accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(close(accel.angular.x, 0.0f));
+		assert(close(accel.angular.y, 0.0f));
+		assert(accel.angular.z > 1e-4);
+	}
+
+	test("quat ctrl pitch flip");
+	{
+		// this time we ask for a near-180 degree pitch flip
+		// so we verify that the commanded angular accel is greater
+		struct quad_ctrl_attitude_state ctrlstate;
+		quad_ctrl_attitude_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		set.quat = qaxisangle(mkvec(0,1,0), M_PI_F - 0.1);
+		float thrust = 0.0f;
+
+		struct quad_accel accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(close(accel.angular.x, 0.0f));
+		assert(accel.angular.y > pitch_90deg_omega);
+		assert(close(accel.angular.z, 0.0f));
+	}
+
+	test("quat ctrl yaw priority");
+	{
+		float const kpz_orig = params.attitude.kp.z;
+
+		struct quad_ctrl_attitude_state ctrlstate;
+		quad_ctrl_attitude_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		// positive pitch after yaw ends up pointing towards +y
+		set.quat = qqmul(
+			qaxisangle(mkvec(0,1,0), M_PI_2_F),
+			qaxisangle(mkvec(0,0,1), M_PI_2_F));
+		float thrust = 0.0f;
+		struct quad_accel accel;
+
+		// typical case - yaw priority 0.4
+		params.attitude.kp.z = 0.4 * params.attitude.kp.xy;
+		accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(fabs(accel.angular.x) > fabs(accel.angular.z));
+
+		// extreme case, yaw priority almost 0
+		params.attitude.kp.z = 1.0 * params.attitude.kp.xy;
+		accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(close(fabs(accel.angular.x), fabs(accel.angular.z)));
+
+		// extreme case, equal yaw priority
+		params.attitude.kp.z = 1e-6 * params.attitude.kp.xy;
+		accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(fabs(accel.angular.z) < 1e-3);
+
+		params.attitude.kp.z = kpz_orig;
+	}
+
+	test("quat ctrl random one step");
+	{
+		struct quad_ctrl_attitude_state ctrlstate;
+
+		srand(1); // deterministic
+		int const TRIALS = 1000;
+		for (int i = 0; i < TRIALS; ++i) {
+
+			quad_ctrl_attitude_init(&ctrlstate);
+			struct quad_state s = zero, set = zero;
+			float thrust = 0.0f;
+
+			// who knows what is the probability distribution of this quat???
+			s.quat = randquat();
+			set.quat = randquat();
+			struct vec dummy = quat2axis(s.quat); // to get quat2axis compiled in binary
+			float const before_err = quat2angle(qqmul(set.quat, qinv(s.quat)));
+
+			struct quad_accel accel = quad_ctrl_attitude(
+				&ctrlstate, &params, &s, &set, thrust, dt);
+			struct quat const next = qnormalize(
+				quat_gyro_update(s.quat, accel.angular, 1e-4));
+			float const next_err = quat2angle(qqmul(set.quat, qinv(next)));
+
+			assert(fabs(next_err) < fabs(before_err));
+		}
 	}
 }
 
@@ -494,7 +646,8 @@ int main()
 	puts("testing libquadrotor...");
 	puts(hrule);
 
-	test_control();
+	test_SE3_control();
+	test_quaternion_control();
 	test_powerdist();
 	test_dynamics();
 	test_closedloop();

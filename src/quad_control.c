@@ -1,5 +1,6 @@
 #include "quad_control.h"
 #include <math.h>
+#include <assert.h>
 
 static inline void integrate_clamp(struct vec *integral,
 	struct vec const *bound, struct vec const *value, float dt)
@@ -152,6 +153,123 @@ struct quad_accel quad_ctrl_SE3(
 
 	return output;
 }
+
+void quad_ctrl_attitude_default_params(struct quad_ctrl_attitude_params *params)
+{
+	struct quad_ctrl_attitude_params p = {
+		// TODO all comments in in SE3 controller apply here too
+		.omega = {
+			.kp = {.xy = 18.6f, .z = 11.2f},
+			.ki = {.xy = 0.00f, .z = 0.00f},
+			//.kd = {.xy = 0.0f, .z = 0.0f}, // TODO
+		},
+		.attitude = {
+			.kp = {.xy = 130.3f, .z = 111.7f},
+		},
+
+		.int_linear_bound = {.x = 2.0f, .y = 2.0f, .z = 0.4f},
+		.int_omega_bound = {.x = 1.0f, .y = 1.0f, .z = 0.0f}, // TODO
+	};
+	*params = p;
+}
+
+void quad_ctrl_attitude_init(struct quad_ctrl_attitude_state *state)
+{
+	state->int_omega_err = vzero();
+}
+
+static struct vec qzbody(struct quat q)
+{
+	float x = q.x, y = q.y, z = q.z, w = q.w;
+	return mkvec(
+		2*x*z + 2*y*w,
+		2*y*z - 2*x*w,
+		1 - 2*x*x - 2*y*y
+	);
+}
+
+static float sign(float x) {
+	return (x >= 0.0f) ? 1.0f : -1.0f;
+}
+
+struct quad_accel quad_ctrl_attitude(
+	struct quad_ctrl_attitude_state *state,
+	struct quad_ctrl_attitude_params const *param,
+	struct quad_state const *s, struct quad_state const *set, float thrust_set, float dt)
+{
+	// this controller implements the paper:
+	// "Nonlinear Quadrocopter Attitude Control Technical Report"
+	// D. Brescianini, M. Hehn, R. D'Andrea., ETH Zurich, 2013.
+	// notation is mostly same but we use standard quaternion multiplication order
+	// and do more computations in body frame instead of inertial frame.
+
+	// vector in inertial frame that gives desired thrust direction with no regard for yaw.
+	struct vec const zbody_des_world = qzbody(set->quat);
+
+	// expression of zbody_des in body frame.
+	struct vec const zbody_des = qvrot(qinv(s->quat), zbody_des_world);
+
+	// rotation in body frame to reach thrust-only attitude.
+	// TODO: can simplify by manual const-propagation of [0,0,1]
+	//struct quat const q_reduced = qnormalize(qvectovec(mkvec(0,0,1), zbody_des));
+	struct quat const q_reduced = qvectovec(mkvec(0,0,1), zbody_des);
+
+	// rotation in body frame to full setpoint attitude.
+	struct quat const q_full = qqmul(set->quat, qinv(s->quat));
+
+	// rotation from q_reduced to q_full.
+	struct quat q_mix = qqmul(q_full, qinv(q_reduced));
+
+	// fix double-covering by forcing q_mix to be a rotation about +z
+	// so the angle expressed by q_mix can be compared to current z angular velocity
+	assert(q_mix.x < 1e-4);
+	assert(q_mix.y < 1e-4);
+	if (q_mix.z < 0) {
+		q_mix = qneg(q_mix);
+	}
+	// angle of yaw rotation
+	float const alpha_mix = quat2angle(q_mix);
+
+	// convert our PID-style params to time constant used in paper
+	float const tau = 1.0 / param->attitude.kp.xy;
+	float const yaw_priority = param->attitude.kp.z * tau;
+
+	// if body yaw rate is high, we should prefer to do a yaw correction
+	// in the same direction even if it's more than 180 degrees.
+	// copied verbatim from ETHZ paper. would like to simplify a little --
+	// do we really need the trig and all the pi factors?
+	// also, unless yaw priority is quite low, the threshold ends up being huge
+	float const omega_z_min = sinf(M_PI_2_F * yaw_priority) / tau;
+	float const threshold = ((M_PI_F - alpha_mix) * M_1_PI_F) * omega_z_min;
+	float const omega_clash = sign(q_mix.w) * s->omega.z;
+
+	float yaw_correction;
+	if (omega_clash < -threshold) {
+		// our yaw angular velocity is opposite of desired attitude correction,
+		// but it's fast enough that we prefer continuing in this direction
+		// even though we'll need to rotate more than 180 degrees.
+		// this correction is only needed for yaw because control authority is low.
+		yaw_correction = M_PI_F * sign(s->omega.z);
+	}
+	else {
+		yaw_correction = alpha_mix;
+	}
+	yaw_correction *= yaw_priority;
+	struct quat const q_yaw = qaxisangle(mkvec(0, 0, 1), yaw_correction);
+
+	// final desired rotation
+	struct quat const q_err = qqmul(q_yaw, q_reduced);
+
+	// mix feedforward with feedback
+	struct vec const omega_feedback = vscl(2.0 / tau * sign(q_err.w),
+		quatimagpart(q_err));
+	struct quad_accel const output = {
+		.angular = vadd(omega_feedback, set->omega),
+		.linear = thrust_set
+	};
+	return output;
+}
+
 
 struct quad_accel quad_ctrl_attitude_rate(
 	struct quad_ctrl_attitude_rate_state *state,
