@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cmath3d/math3d.h"
+#include "math3d.h"
 
 float const GRAV = 9.81;
 
@@ -12,8 +12,8 @@ struct quad_state
 	struct vec vel;
 	struct vec acc;
 
-	struct quat quat;
-	struct vec omega;
+	struct quat quat; // from body frame to world frame.
+	struct vec omega; // radians per second in body frame.
 	int ticks_since_qnormalize;
 };
 static inline void quad_zero_state(struct quad_state *s)
