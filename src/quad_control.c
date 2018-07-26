@@ -22,13 +22,18 @@ static struct vec qzaxis(struct quat q)
 	);
 }
 
-void quad_ctrl_SE3_default_params(struct quad_ctrl_SE3_params *params)
+static float sign(float x) {
+	return (x >= 0.0f) ? 1.0f : -1.0f;
+}
+
+void quad_ctrl_default_params(struct quad_ctrl_params *params)
 {
-	struct quad_ctrl_SE3_params p = {
+	struct quad_ctrl_params p = {
 		.linear = {
 			.kp = {.xy = 12.5f, .z = 39.0f},
 			.ki = {.xy = 1.55f, .z = 1.55f},
 			.kd = {.xy = 6.25f, .z = 12.5f},
+			.int_bound = {.x = 2.0f, .y = 2.0f, .z = 0.4f},
 		},
 		// TODO: does it make sense to integrate omega error,
 		// when it's basically the same as the attitude error?
@@ -46,17 +51,12 @@ void quad_ctrl_SE3_default_params(struct quad_ctrl_SE3_params *params)
 
 		// TODO: should we really have a d term on omega?
 		// some pilot-oriented flight controllers have it...
-		.omega = {
-			.kp = {.xy = 18.6f, .z = 11.2f},
-			.ki = {.xy = 0.00f, .z = 0.00f},
-			//.kd = {.xy = 0.0f, .z = 0.0f}, // TODO
-		},
 		.attitude = {
 			.kp = {.xy = 130.3f, .z = 111.7f},
+			.ki = {.xy = 0.00f, .z = 0.00f},
+			.kd = {.xy = 18.6f, .z = 11.2f},
+			.int_bound = {.x = 1.0f, .y = 1.0f, .z = 0.0f}, // TODO
 		},
-
-		.int_linear_bound = {.x = 2.0f, .y = 2.0f, .z = 0.4f},
-		.int_omega_bound = {.x = 1.0f, .y = 1.0f, .z = 0.0f}, // TODO
 	};
 	*params = p;
 }
@@ -78,24 +78,21 @@ void physical_params_crazyflie2(struct quad_physical_params *params)
 	*params = p;
 }
 
-void quad_ctrl_SE3_init(struct quad_ctrl_SE3_state *state)
+void quad_ctrl_init(struct quad_ctrl_state *state)
 {
 	state->int_linear_err = vzero();
-	state->int_omega_err = vzero();
+	state->int_attitude_err = vzero();
 }
 
-struct quad_accel quad_ctrl_SE3(
-	struct quad_ctrl_SE3_state *state,
-	struct quad_ctrl_SE3_params const *param,
+struct quad_accel quad_ctrl_full(
+	struct quad_ctrl_state *state,
+	struct quad_ctrl_params const *param,
 	struct quad_state const *s, struct quad_state const *set, float dt)
 {
-	struct mat33 const R = quat2rotmat(s->quat);
-	struct quad_accel output;
-
 	// -------------------- Linear part --------------------
 	struct vec const pos_error = vsub(set->pos, s->pos);
 	struct vec const vel_error = vsub(set->vel, s->vel);
-	integrate_clamp(&state->int_linear_err, &param->int_linear_bound, &pos_error, dt);
+	integrate_clamp(&state->int_linear_err, &param->linear.int_bound, &pos_error, dt);
 	struct vec const target_acc = vadd4(
 		set->acc,
 		xy_zmul(param->linear.kp, pos_error),
@@ -104,11 +101,8 @@ struct quad_accel quad_ctrl_SE3(
 	);
 	struct vec const target_thrust = vadd(target_acc, mkvec(0.0f, 0.0f, GRAV));
 
-	struct vec const z_axis = mcolumn(R, 2);
-	output.linear = vdot(target_thrust, z_axis);
-
-	// TODO: check for saturation and prioritize altitude hold, a la
-	// Mike Hamer's (github.com/mikehamer/crazyflie-firmware/blob/K31-NL/src/modules/src/controller_new.c)
+	struct vec const z_axis = qzaxis(s->quat);
+	float const thrust_mag = vdot(target_thrust, z_axis);
 
 	// -------------------- Angular part --------------------
 	// construct the desired attitude, avoiding yaw singularity by using quats.
@@ -116,56 +110,20 @@ struct quad_accel quad_ctrl_SE3(
 	struct quat q_yaw = qaxisangle(mkvec(0,0,1), target_yaw);
 	struct quat q_thrust = qvectovec(mkvec(0,0,1), vnormalize(target_thrust));
 	struct quat q_des = qqmul(q_thrust, q_yaw);
+	struct quad_state set2;
+	set2.quat = q_des;
+	set2.omega = set->omega;
 
-	struct quat const q_err = qposreal(qqmul(q_des, qinv(s->quat)));
-	// scale to match output of vee map
-	struct vec const eR = vscl(2.0f / sqrtf(2.0f), quatimagpart(q_err));
-
-	struct vec const omega_error = vsub(set->omega, s->omega);
-	integrate_clamp(&state->int_omega_err, &param->int_omega_bound, &omega_error, dt);
-	// TODO add feedforward term for angular acceleration in input?
-	// TODO implement derivative term for angular velocity error
-	output.angular = vadd3(
-		xy_zmul(param->attitude.kp, eR),
-		xy_zmul(param->omega.kp, omega_error),
-		xy_zmul(param->omega.ki, state->int_omega_err)
-	);
+	struct quad_accel output = quad_ctrl_attitude(state, param, s, &set2, dt);
+	output.linear = thrust_mag;
 
 	return output;
 }
 
-void quad_ctrl_attitude_default_params(struct quad_ctrl_attitude_params *params)
-{
-	struct quad_ctrl_attitude_params p = {
-		// TODO all comments in in SE3 controller apply here too
-		.omega = {
-			.kp = {.xy = 18.6f, .z = 11.2f},
-			.ki = {.xy = 0.00f, .z = 0.00f},
-			//.kd = {.xy = 0.0f, .z = 0.0f}, // TODO
-		},
-		.attitude = {
-			.kp = {.xy = 130.3f, .z = 111.7f},
-		},
-
-		.int_linear_bound = {.x = 2.0f, .y = 2.0f, .z = 0.4f},
-		.int_omega_bound = {.x = 1.0f, .y = 1.0f, .z = 0.0f}, // TODO
-	};
-	*params = p;
-}
-
-void quad_ctrl_attitude_init(struct quad_ctrl_attitude_state *state)
-{
-	state->int_omega_err = vzero();
-}
-
-static float sign(float x) {
-	return (x >= 0.0f) ? 1.0f : -1.0f;
-}
-
 struct quad_accel quad_ctrl_attitude(
-	struct quad_ctrl_attitude_state *state,
-	struct quad_ctrl_attitude_params const *param,
-	struct quad_state const *s, struct quad_state const *set, float thrust_set, float dt)
+	struct quad_ctrl_state *state,
+	struct quad_ctrl_params const *param,
+	struct quad_state const *s, struct quad_state const *set, float dt)
 {
 	// this controller implements the paper:
 	// "Nonlinear Quadrocopter Attitude Control Technical Report"
@@ -188,7 +146,7 @@ struct quad_accel quad_ctrl_attitude(
 	struct quat const q_full = qqmul(set->quat, qinv(s->quat));
 
 	// rotation from q_reduced to q_full.
-	struct quat q_mix = qqmul(q_full, qinv(q_reduced));
+	struct quat q_mix = qnormalize(qqmul(q_full, qinv(q_reduced)));
 
 	// fix double-covering by forcing q_mix to be a rotation about +z
 	// so the angle expressed by q_mix can be compared to current z angular velocity
@@ -229,30 +187,31 @@ struct quad_accel quad_ctrl_attitude(
 	struct quat const q_err = qqmul(q_yaw, q_reduced);
 
 	// mix feedforward with feedback
-	struct vec const omega_feedback = vscl(2.0 / tau * sign(q_err.w),
+	float const scale = (2.0f / sqrtf(2.0f)) / tau;
+	struct vec const omega_feedback = vscl(scale * sign(q_err.w),
 		quatimagpart(q_err));
 	struct quad_accel const output = {
-		.angular = vadd(omega_feedback, set->omega),
-		.linear = thrust_set
+		.angular = vadd(omega_feedback, xy_zmul(param->attitude.kd, vsub(set->omega, s->omega))),
+		.linear = 0.0f
 	};
 	return output;
 }
 
 
 struct quad_accel quad_ctrl_attitude_rate(
-	struct quad_ctrl_attitude_rate_state *state,
-	struct quad_ctrl_attitude_rate_params const *param,
+	struct quad_ctrl_state *state,
+	struct quad_ctrl_params const *param,
 	struct vec s, struct vec set, float thrust, float dt)
 {
 	struct quad_accel output;
 
 	struct vec const omega_error = vsub(set, s);
-	integrate_clamp(&state->int_omega_err, &param->int_omega_bound, &omega_error, dt);
+	integrate_clamp(&state->int_attitude_err, &param->attitude.int_bound, &omega_error, dt);
 	// TODO add feedforward term for angular acceleration in input?
 	// TODO implement derivative term for angular velocity error
 	output.angular = vadd(
-		xy_zmul(param->kp, omega_error),
-		xy_zmul(param->ki, state->int_omega_err)
+		xy_zmul(param->attitude.kd, omega_error),
+		xy_zmul(param->attitude.ki, state->int_attitude_err)
 	);
 	output.linear = thrust;
 	return output;
