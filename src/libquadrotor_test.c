@@ -187,6 +187,8 @@ void test_quaternion_control()
 		assert(vclose(accel.angular, vzero()));
 	}
 
+	// TODO: should be possible to make the ratio bounds
+	// in roll and pitch tests bigger than 1e3. is f32 error really that bad?
 	test("quat ctrl roll");
 	{
 		struct quad_ctrl_attitude_state ctrlstate;
@@ -197,9 +199,9 @@ void test_quaternion_control()
 
 		struct quad_accel accel = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, thrust, dt);
-		assert(accel.angular.x > 1e-4);
-		assert(close(accel.angular.y, 0.0f));
-		assert(close(accel.angular.z, 0.0f));
+		assert(accel.angular.x > 1);
+		assert(fabs(accel.angular.x / accel.angular.y) > 1e3);
+		assert(fabs(accel.angular.x / accel.angular.z) > 1e3);
 	}
 
 	float pitch_90deg_omega;
@@ -213,9 +215,9 @@ void test_quaternion_control()
 
 		struct quad_accel accel = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, thrust, dt);
-		assert(close(accel.angular.x, 0.0f));
-		assert(accel.angular.y > 1e-4);
-		assert(close(accel.angular.z, 0.0f));
+		assert(fabs(accel.angular.y / accel.angular.x) > 1e3);
+		assert(accel.angular.y > 1);
+		assert(fabs(accel.angular.y / accel.angular.z) > 1e3);
 		pitch_90deg_omega = accel.angular.y;
 	}
 
@@ -302,6 +304,7 @@ void test_quaternion_control()
 			s.quat = randquat();
 			set.quat = randquat();
 			struct vec dummy = quat2axis(s.quat); // to get quat2axis compiled in binary
+			#pragma unused(dummy)
 			float const before_err = quat2angle(qqmul(set.quat, qinv(s.quat)));
 
 			struct quad_accel accel = quad_ctrl_attitude(
@@ -571,7 +574,7 @@ void test_closedloop()
 			now.quat = qaxisangle(axis, angle);
 			now.omega = randvecbox(-0.5, 0.5);
 
-			for (int t = 0; t < 200; ++t) {
+			for (int t = 0; t < 300; ++t) {
 				struct quad_accel acc = quad_ctrl_SE3(
 					&ctrl_state, &ctrl_params, &now, &goal, dt);
 				// assume the control is perfectly realized.
