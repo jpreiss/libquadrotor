@@ -14,32 +14,22 @@
 // but only 3 degrees of freedom. Also, it keeps the EKF quantities close to 0,
 // which is a good thing [citation needed].
 
-#define EKF_N 9           // state dimension
-#define EKF_M 9           // measurement dimension
-#define EKF_DISTURBANCE 6 // control (IMU) noise dimension
+#define QUAD_EKF_N 9           // state dimension (pos, vel, quat err)
+#define QUAD_EKF_M 9           // measurement dimension
+#define QUAD_EKF_DISTURBANCE 6 // control (IMU) noise dimension
 
-struct ekf
+struct quad_ekf
 {
-	// integrator state
-	struct vec pos;
-	struct vec vel;
-	struct quat quat;
-	//struct vec bias_gyro;
-	//struct vec bias_acc;
+	struct quad_state state;
 
 	// TODO symmetric matrix storage optimization?
-	float P[EKF_N][EKF_N]; // error state covariance
-
-	//float temp[EKF_N][EKF_N]; // temporary storage for matrix calcs
-	//float temp2[EKF_N][EKF_N];
-
-  // since EKF computes acc in world frame, we save it here as convenience
-  // to other parts of the system
-  struct vec acc;
+	float P[QUAD_EKF_N][QUAD_EKF_N]; // error state covariance
 };
 
-void ekf_init(struct ekf *ekf, float const pos[3], float const vel[3], float const quat[4]);
+void quad_ekf_init(struct quad_ekf *ekf, struct vec pos, struct vec vel, struct quat quat);
 
-void ekf_imu(struct ekf const *ekf_prev, struct ekf *ekf, float const acc[3], float const gyro[3], float dt);
+void quad_ekf_imu(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
+	struct vec acc, struct vec gyro, float dt);
 
-void ekf_vicon(struct ekf const *ekf_prev, struct ekf *ekf, float const pos_vicon[3], float const vel_vicon[3], float const quat_vicon[4]);
+void quad_ekf_fullpose(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
+	struct vec pos, struct vec vel, struct quat quat);

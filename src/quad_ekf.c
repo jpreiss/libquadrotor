@@ -139,13 +139,13 @@ static float acc_var_xyz = 2.4e-3;
 
 // ------ utility functions for manipulating blocks of the EKF matrices ------
 
-static void set_K_block33(float m[EKF_N][EKF_N], int row, int col, struct mat33 const *block)
+static void set_K_block33(float m[QUAD_EKF_N][QUAD_EKF_N], int row, int col, struct mat33 const *block)
 {
 	float *blockptr = &m[row][col];
-	set_block33_rowmaj(blockptr, EKF_N, block);
+	set_block33_rowmaj(blockptr, QUAD_EKF_N, block);
 }
 
-static void mult_K_block33(float m[EKF_N][EKF_N], int row, int col, struct mat33 const *a, struct mat33 const *b)
+static void mult_K_block33(float m[QUAD_EKF_N][QUAD_EKF_N], int row, int col, struct mat33 const *a, struct mat33 const *b)
 {
 	for (int i = 0; i < 3; ++i) {
 		for (int j = 0; j < 3; ++j) {
@@ -158,32 +158,36 @@ static void mult_K_block33(float m[EKF_N][EKF_N], int row, int col, struct mat33
 	}
 }
 
-// static void set_H_block33(float h[EKF_M][EKF_N], int row, int col, struct mat33 const *block)
+// static void set_H_block33(float h[QUAD_EKF_M][QUAD_EKF_N], int row, int col, struct mat33 const *block)
 // {
 // 	float *blockptr = &h[row][col];
-// 	set_block33_rowmaj(blockptr, EKF_N, block);
+// 	set_block33_rowmaj(blockptr, QUAD_EKF_N, block);
 // }
 
-static void set_G_block33(float G[EKF_N][EKF_DISTURBANCE], int row, int col, struct mat33 const *block)
+static void set_G_block33(float G[QUAD_EKF_N][QUAD_EKF_DISTURBANCE], int row, int col, struct mat33 const *block)
 {
 	float *blockptr = &G[row][col];
-	set_block33_rowmaj(blockptr, EKF_DISTURBANCE, block);
+	set_block33_rowmaj(blockptr, QUAD_EKF_DISTURBANCE, block);
 }
 
 // -------------------------- EKF implementation -----------------------------
 
-// initialize the EKF struct
-void ekf_init(struct ekf *ekf, float const pos[3], float const vel[3], float const quat[4])
+// initialize the EKF struct. TODO: we can probably remove vel argument.
+void quad_ekf_init(struct quad_ekf *ekf, struct vec pos, struct vec vel, struct quat quat)
 {
-	ekf->pos = vloadf(pos);
-	ekf->vel = vloadf(vel);
-	ekf->quat = qloadf(quat);
-	//memcpy(ekf->P, ekf_cov_init, sizeof(ekf_cov_init));
-	eyeN(AS_1D(ekf->P), EKF_N);
-	//initUsecTimer();
+	ekf->state.pos = pos;
+	ekf->state.vel = vel;
+	ekf->state.quat = quat;
+
+	ekf->state.acc = vzero();
+	ekf->state.omega = vzero();
+
+	eyeN(AS_1D(ekf->P), QUAD_EKF_N);
 }
 
-void dynamic_matrix(struct quat const q, struct vec const omega, struct vec const acc, float const dt, float F[EKF_N][EKF_N])
+// compute the discrete time linearized dynamics of the error-state EKF.
+void dynamic_matrix(struct quat const q, struct vec const omega, 
+	struct vec const acc, float const dt, float F[QUAD_EKF_N][QUAD_EKF_N])
 {
 	float const dt_p2_2 = dt * dt * 0.5f;
 	float const dt_p3_6 = dt_p2_2 * dt / 3.0f;
@@ -205,7 +209,7 @@ void dynamic_matrix(struct quat const q, struct vec const omega, struct vec cons
 	struct mat33 E = aXplusbI(-dt, &w_sk, 1.0f); // quat by quat
 	struct mat33 FF = aXplusbI(dt_p2_2, &w_sk, -dt); // quat by gyro bias
 
-	eyeN(AS_1D(F), EKF_N);
+	eyeN(AS_1D(F), QUAD_EKF_N);
 
 	//set_K_block33(F, 0, 3, meyescl(dt));
 	F[0][3] = F[1][4] = F[2][5] = dt;
@@ -218,10 +222,10 @@ void dynamic_matrix(struct quat const q, struct vec const omega, struct vec cons
 }
 
 /* currently unused
-static void symmetricize(float a[EKF_N][EKF_N])
+static void symmetricize(float a[QUAD_EKF_N][QUAD_EKF_N])
 {
-	for (int i = 0; i < EKF_N; ++i) {
-		for (int j = 0; j < EKF_N; ++j) {
+	for (int i = 0; i < QUAD_EKF_N; ++i) {
+		for (int j = 0; j < QUAD_EKF_N; ++j) {
 			float mean = (a[i][j] + a[j][i]) / 2;
 			a[i][j] = mean;
 			a[j][i] = mean;
@@ -230,35 +234,37 @@ static void symmetricize(float a[EKF_N][EKF_N])
 }
 */
 
-void addQ(double dt, struct quat q, struct vec ew, struct vec ea, float Q[EKF_N][EKF_N])
+// add the process covariance to the EKF covariance estimate.
+void addQ(double dt, struct quat q, struct vec ew, struct vec ea, float Q[QUAD_EKF_N][QUAD_EKF_N])
 {
 	// optimize diagonal mmult or maybe A Diag A' ?
-	static float Qdiag[EKF_DISTURBANCE][EKF_DISTURBANCE];
+	static float Qdiag[QUAD_EKF_DISTURBANCE][QUAD_EKF_DISTURBANCE];
 	ZEROARR(Qdiag);
 	Qdiag[0][0] = Qdiag[1][1] = Qdiag[2][2] = gyro_var_xyz;
 	Qdiag[3][3] = Qdiag[4][4] = Qdiag[5][5] = acc_var_xyz;
 
-	static float G[EKF_N][EKF_DISTURBANCE];
+	static float G[QUAD_EKF_N][QUAD_EKF_DISTURBANCE];
 	ZEROARR(G);
 	struct mat33 quat_by_gyro = meyescl(-1);
 	struct mat33 vel_by_acc = mneg(quat2rotmat(qinv(q)));
 	set_G_block33(G, 6, 0, &quat_by_gyro);
 	set_G_block33(G, 3, 3, &vel_by_acc);
 
-	static float QGt[EKF_DISTURBANCE][EKF_N];
+	static float QGt[QUAD_EKF_DISTURBANCE][QUAD_EKF_N];
 	ZEROARR(QGt);
-	SGEMM2D('n', 't', EKF_DISTURBANCE, EKF_N, EKF_DISTURBANCE, 1.0, Qdiag, G, 0.0, QGt);
+	SGEMM2D('n', 't', QUAD_EKF_DISTURBANCE, QUAD_EKF_N, QUAD_EKF_DISTURBANCE, 1.0, Qdiag, G, 0.0, QGt);
 
-	SGEMM2D('n', 'n', EKF_N, EKF_N, EKF_DISTURBANCE, dt, G, QGt, 1.0, Q);
+	SGEMM2D('n', 'n', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_DISTURBANCE, dt, G, QGt, 1.0, Q);
 
 	// debug only
-	//float Qd[EKF_N][EKF_N];
+	//float Qd[QUAD_EKF_N][QUAD_EKF_N];
 	//ZEROARR(Qd);
-	//SGEMM2D('n', 'n', EKF_N, EKF_N, EKF_DISTURBANCE, 1.0, G, QGt, 0.0, Qd);
-	//checksym("Q", AS_1D(Qd), EKF_N);
+	//SGEMM2D('n', 'n', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_DISTURBANCE, 1.0, G, QGt, 0.0, Qd);
+	//checksym("Q", AS_1D(Qd), QUAD_EKF_N);
 }
 
-void ekf_imu(struct ekf const *ekf_prev, struct ekf *ekf, float const acc[3], float const gyro[3], float dt)
+void quad_ekf_imu(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
+	struct vec acc, struct vec omega, float dt)
 {
 	//------------------------- integrate dynamics --------------------------//
 	// propagate constant states
@@ -276,65 +282,61 @@ void ekf_imu(struct ekf const *ekf_prev, struct ekf *ekf, float const acc[3], fl
 	// propagate rotation
 	// TODO only normalize every N steps to save computation?
 	//struct vec const omega = vsub(vloadf(gyro), ekf->bias_gyro);
-	struct vec const omega = vloadf(gyro);
-	ekf->quat = qnormalize(quat_gyro_update(ekf_prev->quat, omega, dt));
+	ekf->state.quat = qnormalize(quat_gyro_update(ekf_prev->state.quat, omega, dt));
 
 	// compute true acceleration
-	//struct vec const acc_imu = vsub(float2vec(acc), ekf->bias_acc);
-	struct vec const acc_imu = vloadf(acc);
-  struct vec acc_world = qvrot(ekf->quat, acc_imu);
-  acc_world.z -= GRAV;
+	struct vec const acc_imu = acc;
+	struct vec acc_world = qvrot(ekf->state.quat, acc_imu);
+	acc_world.z -= GRAV;
 
 	// propagate position + velocity
-	ekf->vel = vadd(ekf_prev->vel, vscl(dt, acc_world));
-	ekf->pos = vadd(ekf_prev->pos, vscl(dt, ekf->vel));
+	ekf->state.vel = vadd(ekf_prev->state.vel, vscl(dt, acc_world));
+	ekf->state.pos = vadd(ekf_prev->state.pos, vscl(dt, ekf->state.vel));
 
-  // provide smoothed acceleration as a convenience for other system components
-  ekf->acc = vadd(vscl(0.7, ekf_prev->acc), vscl(0.3, acc_world));
+	// provide smoothed acceleration as a convenience for other system components
+	ekf->state.acc = vadd(vscl(0.7, ekf_prev->state.acc), vscl(0.3, acc_world));
 
 	//-------------------------- update covariance --------------------------//
 	// TODO should use old quat??
-	static float F[EKF_N][EKF_N];
-	dynamic_matrix(ekf->quat, omega, acc_imu, dt, F);
+	static float F[QUAD_EKF_N][QUAD_EKF_N];
+	dynamic_matrix(ekf->state.quat, omega, acc_imu, dt, F);
 
 	// Pnew = F P Ft + Q
-	static float PFt[EKF_N][EKF_N];
+	static float PFt[QUAD_EKF_N][QUAD_EKF_N];
 	ZEROARR(PFt);
-	SGEMM2D('n', 't', EKF_N, EKF_N, EKF_N, 1.0, ekf_prev->P, F, 0.0, PFt);
-	SGEMM2D('n', 'n', EKF_N, EKF_N, EKF_N, 1.0, F, PFt, 0.0, ekf->P);
-	addQ(dt, ekf->quat, omega, acc_imu, ekf->P);
+	SGEMM2D('n', 't', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_N, 1.0, ekf_prev->P, F, 0.0, PFt);
+	SGEMM2D('n', 'n', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_N, 1.0, F, PFt, 0.0, ekf->P);
+	addQ(dt, ekf->state.quat, omega, acc_imu, ekf->P);
 	//symmetricize(ekf->P);
 }
 
-void ekf_vicon(struct ekf const *old, struct ekf *new, float const pos_vicon[3], float const vel_vicon[3], float const quat_vicon[4])//, double *debug)
+void quad_ekf_fullstate(struct quad_ekf const *old, struct quad_ekf *new,
+	struct vec pos, struct vec vel, struct quat quat)
 {
 	*new = *old;
 
-	struct vec const p_vicon = vloadf(pos_vicon);
-	struct vec const v_vicon = vloadf(vel_vicon);
-	struct quat const q_vicon = qloadf(quat_vicon);
-
-	struct quat const q_residual = qqmul(qinv(old->quat), q_vicon);
+	struct quat const q_residual = qqmul(qinv(old->state.quat), quat);
+	// TODO should be a function in cmath3d, I think
 	struct vec const err_quat = vscl(2.0f / q_residual.w, quatimagpart(q_residual));
-	struct vec const err_pos = vsub(p_vicon, old->pos);
-	struct vec const err_vel = vsub(v_vicon, old->vel);
+	struct vec const err_pos = vsub(pos, old->state.pos);
+	struct vec const err_vel = vsub(vel, old->state.vel);
 
-	float residual[EKF_M];
+	float residual[QUAD_EKF_M];
 	vstoref(err_pos, residual);
 	vstoref(err_vel, residual + 3);
 	vstoref(err_quat, residual + 6);
 
 	// S = (H P H' + R)  :  innovation
 	// H = Identity, so S = (P + R)
-	static float S[EKF_M][EKF_M];
+	static float S[QUAD_EKF_M][QUAD_EKF_M];
 	COPYMAT(S, old->P);
-	float const Rdiag[EKF_M] =
+	float const Rdiag[QUAD_EKF_M] =
 		{ ext_var_xy, ext_var_xy, ext_var_xy, 
 		  ext_var_vel, ext_var_vel, ext_var_vel,
 		  ext_var_q, ext_var_q, ext_var_q };
-	float R[EKF_M][EKF_M];
+	float R[QUAD_EKF_M][QUAD_EKF_M];
 	ZEROARR(R);
-	for (int i = 0; i < EKF_M; ++i) {
+	for (int i = 0; i < QUAD_EKF_M; ++i) {
 		S[i][i] += Rdiag[i];
 		R[i][i] = Rdiag[i];
 	}
@@ -342,51 +344,51 @@ void ekf_vicon(struct ekf const *old, struct ekf *new, float const pos_vicon[3],
 	// K = P H' S^-1  :  gain
 	// H = Identity, so K = P S^-1
 
-	static float Sinv[EKF_M][EKF_M];
-	static float scratch[EKF_M];
-	cholsl(AS_1D(S), AS_1D(Sinv), scratch, EKF_M);
+	static float Sinv[QUAD_EKF_M][QUAD_EKF_M];
+	static float scratch[QUAD_EKF_M];
+	cholsl(AS_1D(S), AS_1D(Sinv), scratch, QUAD_EKF_M);
 
-	static float K[EKF_N][EKF_M];
+	static float K[QUAD_EKF_N][QUAD_EKF_M];
 	ZEROARR(K);
-	SGEMM2D('n', 'n', EKF_N, EKF_M, EKF_N, 1.0, old->P, Sinv, 0.0, K);
+	SGEMM2D('n', 'n', QUAD_EKF_N, QUAD_EKF_M, QUAD_EKF_N, 1.0, old->P, Sinv, 0.0, K);
 
 
 	// K residual : correction
 
-	static float correction[EKF_N];
+	static float correction[QUAD_EKF_N];
 	ZEROARR(correction);
-	sgemm('n', 'n', EKF_N, 1, EKF_M, 1.0, AS_1D(K), residual, 0.0, correction);
+	sgemm('n', 'n', QUAD_EKF_N, 1, QUAD_EKF_M, 1.0, AS_1D(K), residual, 0.0, correction);
 
-	new->pos = vadd(old->pos, vloadf(correction + 0));
-	new->vel = vadd(old->vel, vloadf(correction + 3));
+	new->state.pos = vadd(old->state.pos, vloadf(correction + 0));
+	new->state.vel = vadd(old->state.vel, vloadf(correction + 3));
 	struct quat error_quat = rpy2quat_small(vloadf(correction + 6));
-	new->quat = qnormalize(qqmul(old->quat, error_quat));
+	new->state.quat = qnormalize(qqmul(old->state.quat, error_quat));
 	// TODO biases, if we use dem
 
 
 	// Pnew = (I - KH) P (I - KH)^T + KRK^T  :  covariance update
 	// TODO optimize KRK^T with R diagonal
-	static float RKt[EKF_M][EKF_N];
+	static float RKt[QUAD_EKF_M][QUAD_EKF_N];
 	ZEROARR(RKt);
-	SGEMM2D('n', 't', EKF_M, EKF_N, EKF_M, 1.0, R, K, 0.0, RKt);
+	SGEMM2D('n', 't', QUAD_EKF_M, QUAD_EKF_N, QUAD_EKF_M, 1.0, R, K, 0.0, RKt);
 
 	// KRKt - store in P so we can add to it in-place with SGEMM later
-	SGEMM2D('n', 'n', EKF_N, EKF_N, EKF_M, 1.0, K, RKt, 0.0, new->P);
+	SGEMM2D('n', 'n', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_M, 1.0, K, RKt, 0.0, new->P);
 
 	// I - KH
 	// H = Identity, so I - K
-	static float IMKH[EKF_N][EKF_N];
-	eyeN(AS_1D(IMKH), EKF_N);
-	for (int i = 0; i < EKF_N; ++i) {
-		for (int j = 0; j < EKF_N; ++j) {
+	static float IMKH[QUAD_EKF_N][QUAD_EKF_N];
+	eyeN(AS_1D(IMKH), QUAD_EKF_N);
+	for (int i = 0; i < QUAD_EKF_N; ++i) {
+		for (int j = 0; j < QUAD_EKF_N; ++j) {
 			IMKH[i][j] -= K[i][j];
 		}
 	}
 
-	static float PIMKHt[EKF_N][EKF_N];
+	static float PIMKHt[QUAD_EKF_N][QUAD_EKF_N];
 	ZEROARR(PIMKHt);
-	SGEMM2D('n', 't', EKF_N, EKF_N, EKF_N, 1.0, old->P, IMKH, 0.0, PIMKHt);
+	SGEMM2D('n', 't', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_N, 1.0, old->P, IMKH, 0.0, PIMKHt);
 
 	// recall that new->P already contains KRK^T, and we use beta=1.0 to add in-place
-	SGEMM2D('n', 'n', EKF_N, EKF_N, EKF_N, 1.0, IMKH, PIMKHt, 1.0, new->P);
+	SGEMM2D('n', 'n', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_N, 1.0, IMKH, PIMKHt, 1.0, new->P);
 }
