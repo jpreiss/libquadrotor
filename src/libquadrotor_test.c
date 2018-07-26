@@ -125,45 +125,19 @@ void test_SE3_control()
 		assert(close(acc.linear, GRAV));
 	}
 
-	test("check vee map");
+	test("yaw singularity");
 	{
-		struct mat33 R = meye();
-
-		// roll
-		struct mat33 Rdes = mcolumns(mkvec(1,0,0), mkvec(0,0,1), mkvec(0,-1,0));
-		struct vec eR = vee_map_rot_error(&R, &Rdes);
-		assert(vclose(eR, mkvec(-1, 0, 0)));
-
-		// pitch
-		Rdes = mcolumns(mkvec(0,0,-1), mkvec(0,1,0), mkvec(1,0,0));
-		eR = vee_map_rot_error(&R, &Rdes);
-		assert(vclose(eR, mkvec(0, -1, 0)));
-
-		// yaw
-		Rdes = mcolumns(mkvec(0,1,0), mkvec(-1,0,0), mkvec(0,0,1));
-		eR = vee_map_rot_error(&R, &Rdes);
-		assert(vclose(eR, mkvec(0, 0, -1)));
-	}
-
-	test("check vee map fast");
-	{
-		//struct mat33 R = meye();
-		struct quat q = qeye();
-
-		// roll
-		struct mat33 Rdes = mcolumns(mkvec(1,0,0), mkvec(0,0,1), mkvec(0,-1,0));
-		struct vec eR = vee_map_rot_error_quat2mat(&q, &Rdes);
-		assert(vclose(eR, mkvec(-1, 0, 0)));
-
-		// pitch
-		Rdes = mcolumns(mkvec(0,0,-1), mkvec(0,1,0), mkvec(1,0,0));
-		eR = vee_map_rot_error_quat2mat(&q, &Rdes);
-		assert(vclose(eR, mkvec(0, -1, 0)));
-
-		// yaw
-		Rdes = mcolumns(mkvec(0,1,0), mkvec(-1,0,0), mkvec(0,0,1));
-		eR = vee_map_rot_error_quat2mat(&q, &Rdes);
-		assert(vclose(eR, mkvec(0, 0, -1)));
+		// this fails using the desired rot mtx from Mellinger's paper
+		// but succeeds with quaternions
+		struct quad_ctrl_SE3_state ctrlstate;
+		quad_ctrl_SE3_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		set.acc = mkvec(GRAV, 0, -GRAV);
+		set.quat = qaxisangle(mkvec(0,1,0), radians(89.9999));
+		struct quad_accel acc = quad_ctrl_SE3(&ctrlstate, &params, &s, &set, dt);
+		assert(close(acc.angular.x, 0));
+		assert(close(acc.angular.y, params.attitude.kp.xy));
+		assert(close(acc.angular.z, 0));
 	}
 }
 
@@ -315,6 +289,27 @@ void test_quaternion_control()
 
 			assert(fabs(next_err) < fabs(before_err));
 		}
+	}
+
+	test("quat ctrl yaw vel heuristic");
+	{
+		struct quad_ctrl_attitude_state ctrlstate;
+		quad_ctrl_attitude_init(&ctrlstate);
+		struct quad_state s = zero, set = zero;
+		set.quat = qaxisangle(mkvec(0,0,1), -M_PI_2_F);
+		float thrust = 0.0f;
+
+		// heuristic should not happen for low velocity
+		s.omega.z = 1.0f;
+		struct quad_accel accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(accel.angular.z < 0.0f);
+
+		// heuristic should definitely happen for high velocity
+		s.omega.z = 1000.0f;
+		accel = quad_ctrl_attitude(
+			&ctrlstate, &params, &s, &set, thrust, dt);
+		assert(accel.angular.z > 0.0f);
 	}
 }
 

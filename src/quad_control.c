@@ -1,6 +1,5 @@
 #include "quad_control.h"
 #include <math.h>
-#include <assert.h>
 
 static inline void integrate_clamp(struct vec *integral,
 	struct vec const *bound, struct vec const *value, float dt)
@@ -21,32 +20,6 @@ static struct vec qzaxis(struct quat q)
 		2*y*z - 2*x*w,
 		1 - 2*x*x - 2*y*y
 	);
-}
-
-struct vec vee_map_rot_error(struct mat33 const *R, struct mat33 const *Rdes)
-{
-	struct mat33 R_transpose = mtranspose(*R);
-	struct mat33 Rdes_transpose = mtranspose(*Rdes);
-	struct mat33 eRM = msub(mmul(Rdes_transpose, *R), mmul(R_transpose, *Rdes));
-	struct vec eR = vscl(0.5, mkvec(eRM.m[2][1], eRM.m[0][2], eRM.m[1][0]));
-	return eR;
-}
-
-struct vec vee_map_rot_error_quat2mat(struct quat const *quat, struct mat33 const *Rdes)
-{
-	// (generated using Mathematica, see paper for details)
-	struct vec eR;
-	float x = quat->x;
-	float y = quat->y;
-	float z = quat->z;
-	float w = quat->w;
-	struct vec xb_des = mcolumn(*Rdes, 0);
-	struct vec yb_des = mcolumn(*Rdes, 1);
-	struct vec zb_des = mcolumn(*Rdes, 2);
-	eR.x = (-1 + 2*fsqr(x) + 2*fsqr(y))*yb_des.z + zb_des.y - 2*(x*yb_des.x*z + y*yb_des.y*z - x*y*zb_des.x + fsqr(x)*zb_des.y + fsqr(z)*zb_des.y - y*z*zb_des.z) +2*w*(-(y*yb_des.x) - z*zb_des.x + x*(yb_des.y + zb_des.z));
-	eR.y = xb_des.z - zb_des.x - 2*(fsqr(x)*xb_des.z + y*(xb_des.z*y - xb_des.y*z) - (fsqr(y) + fsqr(z))*zb_des.x + x*(-(xb_des.x*z) + y*zb_des.y + z*zb_des.z) + w*(x*xb_des.y + z*zb_des.y - y*(xb_des.x + zb_des.z)));
-	eR.z = yb_des.x - 2*(y*(x*xb_des.x + y*yb_des.x - x*yb_des.y) + w*(x*xb_des.z + y*yb_des.z)) + 2*(-(xb_des.z*y) + w*(xb_des.x + yb_des.y) + x*yb_des.z)*z - 2*yb_des.x*fsqr(z) + xb_des.y*(-1 + 2*fsqr(x) + 2*fsqr(z));
-	return vscl(0.5, eR);
 }
 
 void quad_ctrl_SE3_default_params(struct quad_ctrl_SE3_params *params)
@@ -138,19 +111,12 @@ struct quad_accel quad_ctrl_SE3(
 	// Mike Hamer's (github.com/mikehamer/crazyflie-firmware/blob/K31-NL/src/modules/src/controller_new.c)
 
 	// -------------------- Angular part --------------------
-	// construct the desired attitude as a rotation matrix.
-	// (sigularity when the thrust vector is near the horizontal plane -
-	//  world yaw can only lie in one line on the xy plane.
-	//  when near, becomes unstable.)
+	// construct the desired attitude, avoiding yaw singularity by using quats.
 	float const target_yaw = quat2rpy(set->quat).z;
-	struct vec const xc_des = mkvec(cosf(target_yaw), sinf(target_yaw), 0.0f);
-	struct vec const zb_des = vnormalize(target_thrust);
-	struct vec const yb_des = vnormalize(vcross(zb_des, xc_des));
-	struct vec const xb_des = vcross(yb_des, zb_des);
+	struct quat q_yaw = qaxisangle(mkvec(0,0,1), target_yaw);
+	struct quat q_thrust = qvectovec(mkvec(0,0,1), vnormalize(target_thrust));
+	struct quat q_des = qqmul(q_thrust, q_yaw);
 
-	// compute the body frame angular velocity vector to correct the attitude
-	struct mat33 Rdes = mcolumns(xb_des, yb_des, zb_des);
-	struct quat const q_des = mat2quat(Rdes);
 	struct quat const q_err = qposreal(qqmul(q_des, qinv(s->quat)));
 	// scale to match output of vee map
 	struct vec const eR = vscl(2.0f / sqrtf(2.0f), quatimagpart(q_err));
@@ -226,8 +192,6 @@ struct quad_accel quad_ctrl_attitude(
 
 	// fix double-covering by forcing q_mix to be a rotation about +z
 	// so the angle expressed by q_mix can be compared to current z angular velocity
-	assert(q_mix.x < 1e-4);
-	assert(q_mix.y < 1e-4);
 	if (q_mix.z < 0) {
 		q_mix = qneg(q_mix);
 	}
