@@ -13,6 +13,16 @@ static inline struct vec xy_zmul(struct xy_z xy_z, struct vec v)
 	return mkvec(xy_z.xy * v.x, xy_z.xy * v.y, xy_z.z * v.z);
 }
 
+static struct vec qzaxis(struct quat q)
+{
+	float x = q.x, y = q.y, z = q.z, w = q.w;
+	return mkvec(
+		2*x*z + 2*y*w,
+		2*y*z - 2*x*w,
+		1 - 2*x*x - 2*y*y
+	);
+}
+
 struct vec vee_map_rot_error(struct mat33 const *R, struct mat33 const *Rdes)
 {
 	struct mat33 R_transpose = mtranspose(*R);
@@ -123,12 +133,15 @@ struct quad_accel quad_ctrl_SE3(
 
 	struct vec const z_axis = mcolumn(R, 2);
 	output.linear = vdot(target_thrust, z_axis);
+
 	// TODO: check for saturation and prioritize altitude hold, a la
 	// Mike Hamer's (github.com/mikehamer/crazyflie-firmware/blob/K31-NL/src/modules/src/controller_new.c)
 
 	// -------------------- Angular part --------------------
 	// construct the desired attitude as a rotation matrix.
-	// (sigularity when the thrust vector is near the horizontal plane!)
+	// (sigularity when the thrust vector is near the horizontal plane -
+	//  world yaw can only lie in one line on the xy plane.
+	//  when near, becomes unstable.)
 	float const target_yaw = quat2rpy(set->quat).z;
 	struct vec const xc_des = mkvec(cosf(target_yaw), sinf(target_yaw), 0.0f);
 	struct vec const zb_des = vnormalize(target_thrust);
@@ -136,10 +149,11 @@ struct quad_accel quad_ctrl_SE3(
 	struct vec const xb_des = vcross(yb_des, zb_des);
 
 	// compute the body frame angular velocity vector to correct the attitude
-	// (note: unlike other error vars, this one is (state - setpoint))
 	struct mat33 Rdes = mcolumns(xb_des, yb_des, zb_des);
-	struct vec eR = vee_map_rot_error_quat2mat(&s->quat, &Rdes);
-	eR = vscl(-1.0, eR);
+	struct quat const q_des = mat2quat(Rdes);
+	struct quat const q_err = qposreal(qqmul(q_des, qinv(s->quat)));
+	// scale to match output of vee map
+	struct vec const eR = vscl(2.0f / sqrtf(2.0f), quatimagpart(q_err));
 
 	struct vec const omega_error = vsub(set->omega, s->omega);
 	integrate_clamp(&state->int_omega_err, &param->int_omega_bound, &omega_error, dt);
@@ -178,16 +192,6 @@ void quad_ctrl_attitude_init(struct quad_ctrl_attitude_state *state)
 	state->int_omega_err = vzero();
 }
 
-static struct vec qzbody(struct quat q)
-{
-	float x = q.x, y = q.y, z = q.z, w = q.w;
-	return mkvec(
-		2*x*z + 2*y*w,
-		2*y*z - 2*x*w,
-		1 - 2*x*x - 2*y*y
-	);
-}
-
 static float sign(float x) {
 	return (x >= 0.0f) ? 1.0f : -1.0f;
 }
@@ -204,7 +208,7 @@ struct quad_accel quad_ctrl_attitude(
 	// and do more computations in body frame instead of inertial frame.
 
 	// vector in inertial frame that gives desired thrust direction with no regard for yaw.
-	struct vec const zbody_des_world = qzbody(set->quat);
+	struct vec const zbody_des_world = qzaxis(set->quat);
 
 	// expression of zbody_des in body frame.
 	struct vec const zbody_des = qvrot(qinv(s->quat), zbody_des_world);
