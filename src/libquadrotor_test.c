@@ -5,6 +5,7 @@
 
 #include "quad_control.c"
 #include "quad_dynamics.c"
+#include "quad_ekf.c"
 
 #include <assert.h>
 #include <signal.h>
