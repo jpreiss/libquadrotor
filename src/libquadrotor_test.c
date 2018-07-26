@@ -157,9 +157,9 @@ void test_quaternion_control()
 		quad_ctrl_init(&ctrlstate);
 		struct quad_state s = zero, set = zero;
 
-		struct quad_accel accel = quad_ctrl_attitude(
+		struct vec moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(vclose(accel.angular, vzero()));
+		assert(vclose(moment, vzero()));
 	}
 
 	// TODO: should be possible to make the ratio bounds
@@ -174,11 +174,11 @@ void test_quaternion_control()
 		struct quad_state s = zero, set = zero;
 		set.quat = qaxisangle(mkvec(1,0,0), M_PI_2_F);
 
-		struct quad_accel accel = quad_ctrl_attitude(
+		struct vec moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(accel.angular.x > 1);
-		assert(fabs(accel.angular.x / accel.angular.y) > 1e3);
-		assert(fabs(accel.angular.x / accel.angular.z) > 1e3);
+		assert(moment.x > 1);
+		assert(fabs(moment.x / moment.y) > 1e3);
+		assert(fabs(moment.x / moment.z) > 1e3);
 	}
 
 	float pitch_90deg_omega;
@@ -192,12 +192,12 @@ void test_quaternion_control()
 		struct quad_state s = zero, set = zero;
 		set.quat = qaxisangle(mkvec(0,1,0), M_PI_2_F);
 
-		struct quad_accel accel = quad_ctrl_attitude(
+		struct vec moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(fabs(accel.angular.y / accel.angular.x) > 1e3);
-		assert(accel.angular.y > 1);
-		assert(fabs(accel.angular.y / accel.angular.z) > 1e3);
-		pitch_90deg_omega = accel.angular.y;
+		assert(fabs(moment.y / moment.x) > 1e3);
+		assert(moment.y > 1);
+		assert(fabs(moment.y / moment.z) > 1e3);
+		pitch_90deg_omega = moment.y;
 	}
 
 	test("quat ctrl yaw");
@@ -210,11 +210,11 @@ void test_quaternion_control()
 		struct quad_state s = zero, set = zero;
 		set.quat = qaxisangle(mkvec(0,0,1), M_PI_2_F);
 
-		struct quad_accel accel = quad_ctrl_attitude(
+		struct vec moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(close(accel.angular.x, 0.0f));
-		assert(close(accel.angular.y, 0.0f));
-		assert(accel.angular.z > 1e-4);
+		assert(close(moment.x, 0.0f));
+		assert(close(moment.y, 0.0f));
+		assert(moment.z > 1e-4);
 	}
 
 	test("quat ctrl pitch flip");
@@ -229,11 +229,11 @@ void test_quaternion_control()
 		struct quad_state s = zero, set = zero;
 		set.quat = qaxisangle(mkvec(0,1,0), M_PI_F - 0.1);
 
-		struct quad_accel accel = quad_ctrl_attitude(
+		struct vec moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(close(accel.angular.x, 0.0f));
-		assert(accel.angular.y > pitch_90deg_omega);
-		assert(close(accel.angular.z, 0.0f));
+		assert(close(moment.x, 0.0f));
+		assert(moment.y > pitch_90deg_omega);
+		assert(close(moment.z, 0.0f));
 	}
 
 	test("quat ctrl yaw priority");
@@ -250,25 +250,25 @@ void test_quaternion_control()
 		set.quat = qqmul(
 			qaxisangle(mkvec(0,1,0), M_PI_2_F),
 			qaxisangle(mkvec(0,0,1), M_PI_2_F));
-		struct quad_accel accel;
+		struct vec moment;
 
 		// typical case - yaw priority 0.4
 		params.attitude.kp.z = 0.4 * params.attitude.kp.xy;
-		accel = quad_ctrl_attitude(
+		moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(fabs(accel.angular.x) > fabs(accel.angular.z));
+		assert(fabs(moment.x) > fabs(moment.z));
 
 		// extreme case, yaw priority almost 0
 		params.attitude.kp.z = 1.0 * params.attitude.kp.xy;
-		accel = quad_ctrl_attitude(
+		moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(close(fabs(accel.angular.x), fabs(accel.angular.z)));
+		assert(close(fabs(moment.x), fabs(moment.z)));
 
 		// extreme case, equal yaw priority
 		params.attitude.kp.z = 1e-6 * params.attitude.kp.xy;
-		accel = quad_ctrl_attitude(
+		moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(fabs(accel.angular.z) < 1e-3);
+		assert(fabs(moment.z) < 1e-3);
 
 		params.attitude.kp.z = kpz_orig;
 	}
@@ -294,10 +294,10 @@ void test_quaternion_control()
 			#pragma unused(dummy)
 			float const before_err = quat2angle(qqmul(set.quat, qinv(s.quat)));
 
-			struct quad_accel accel = quad_ctrl_attitude(
+			struct vec moment = quad_ctrl_attitude(
 				&ctrlstate, &params, &s, &set, dt);
 			struct quat const next = qnormalize(
-				quat_gyro_update(s.quat, accel.angular, 1e-4));
+				quat_gyro_update(s.quat, moment, 1e-4));
 			float const next_err = quat2angle(qqmul(set.quat, qinv(next)));
 
 			assert(fabs(next_err) < fabs(before_err));
@@ -318,15 +318,15 @@ void test_quaternion_control()
 
 		// heuristic should not happen for low velocity
 		s.omega.z = 1.0f;
-		struct quad_accel accel = quad_ctrl_attitude(
+		struct vec moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(accel.angular.z < 0.0f);
+		assert(moment.z < 0.0f);
 
 		// heuristic should definitely happen for high velocity
 		s.omega.z = 1000.0f;
-		accel = quad_ctrl_attitude(
+		moment = quad_ctrl_attitude(
 			&ctrlstate, &params, &s, &set, dt);
-		assert(accel.angular.z > 0.0f);
+		assert(moment.z > 0.0f);
 	}
 }
 

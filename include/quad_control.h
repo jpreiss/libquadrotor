@@ -39,24 +39,25 @@ void quad_ctrl_default_params(struct quad_ctrl_params *params);
 
 void quad_ctrl_init(struct quad_ctrl_state *state);
 
+// full nonlinear position control.
+// returns desired moment and normalized thrust magnitude (in m/s^2)
 struct quad_accel quad_ctrl_full(
 	struct quad_ctrl_state *state,
 	struct quad_ctrl_params const *param,
 	struct quad_state const *s, struct quad_state const *set, float dt);
 
-// setpoint is matrix + thrust.
-// in typical manual piloting, roll & pitch angle are controlled by one stick
-// and yaw *rate* is controlled by the other.
-// to implement this,
-struct quad_accel quad_ctrl_attitude(
+// returns desired moment
+struct vec quad_ctrl_attitude(
 	struct quad_ctrl_state *state,
 	struct quad_ctrl_params const *param,
 	struct quad_state const *s, struct quad_state const *set, float dt);
 
 //
-// Attitude rate control, aka "acrobatic mode" for human pilots
+// Attitude rate control, aka "acrobatic mode" for human pilots.
+// does not use full quad_state struct since it's unnecessary.
+// returns desired moment
 //
-struct quad_accel quad_ctrl_attitude_rate(
+struct vec quad_ctrl_attitude_rate(
 	struct quad_ctrl_state *state,
 	struct quad_ctrl_params const *param,
 	struct vec s, struct vec set, float thrust, float dt);

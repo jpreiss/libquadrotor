@@ -114,13 +114,14 @@ struct quad_accel quad_ctrl_full(
 	set2.quat = q_des;
 	set2.omega = set->omega;
 
-	struct quad_accel output = quad_ctrl_attitude(state, param, s, &set2, dt);
-	output.linear = thrust_mag;
-
+	struct quad_accel output = {
+		.angular = quad_ctrl_attitude(state, param, s, &set2, dt),
+		.linear = thrust_mag
+	};
 	return output;
 }
 
-struct quad_accel quad_ctrl_attitude(
+struct vec quad_ctrl_attitude(
 	struct quad_ctrl_state *state,
 	struct quad_ctrl_params const *param,
 	struct quad_state const *s, struct quad_state const *set, float dt)
@@ -157,15 +158,14 @@ struct quad_accel quad_ctrl_attitude(
 	float const alpha_mix = quat2angle(q_mix);
 
 	// convert our PID-style params to time constant used in paper
-	float const tau = 1.0 / param->attitude.kp.xy;
-	float const yaw_priority = param->attitude.kp.z * tau;
+	float const yaw_priority = param->attitude.kp.z / param->attitude.kp.xy;
 
 	// if body yaw rate is high, we should prefer to do a yaw correction
 	// in the same direction even if it's more than 180 degrees.
 	// copied verbatim from ETHZ paper. would like to simplify a little --
 	// do we really need the trig and all the pi factors?
 	// also, unless yaw priority is quite low, the threshold ends up being huge
-	float const omega_z_min = sinf(M_PI_2_F * yaw_priority) / tau;
+	float const omega_z_min = param->attitude.kp.xy * sinf(M_PI_2_F * yaw_priority);
 	float const threshold = ((M_PI_F - alpha_mix) * M_1_PI_F) * omega_z_min;
 	float const omega_clash = sign(q_mix.w) * s->omega.z;
 
@@ -186,35 +186,29 @@ struct quad_accel quad_ctrl_attitude(
 	// final desired rotation
 	struct quat const q_err = qqmul(q_yaw, q_reduced);
 
-	// mix feedforward with feedback
-	float const scale = (2.0f / sqrtf(2.0f)) / tau;
-	struct vec const omega_feedback = vscl(scale * sign(q_err.w),
-		quatimagpart(q_err));
-	struct quad_accel const output = {
-		.angular = vadd(omega_feedback, xy_zmul(param->attitude.kd, vsub(set->omega, s->omega))),
-		.linear = 0.0f
-	};
-	return output;
+	float const scale = (2.0f / sqrtf(2.0f));
+	struct vec const moment = vadd(
+		vscl(param->attitude.kp.xy * scale, quatimagpart(qposreal(q_err))),
+		xy_zmul(param->attitude.kd, vsub(set->omega, s->omega))
+	);
+	return moment;
 }
 
 
-struct quad_accel quad_ctrl_attitude_rate(
+struct vec quad_ctrl_attitude_rate(
 	struct quad_ctrl_state *state,
 	struct quad_ctrl_params const *param,
 	struct vec s, struct vec set, float thrust, float dt)
 {
-	struct quad_accel output;
-
 	struct vec const omega_error = vsub(set, s);
 	integrate_clamp(&state->int_attitude_err, &param->attitude.int_bound, &omega_error, dt);
 	// TODO add feedforward term for angular acceleration in input?
 	// TODO implement derivative term for angular velocity error
-	output.angular = vadd(
+	struct vec moment = vadd(
 		xy_zmul(param->attitude.kd, omega_error),
 		xy_zmul(param->attitude.ki, state->int_attitude_err)
 	);
-	output.linear = thrust;
-	return output;
+	return moment;
 }
 
 void quad_power_distribute(
