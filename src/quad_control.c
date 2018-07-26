@@ -1,6 +1,10 @@
 #include "quad_control.h"
 #include <math.h>
 
+//
+// local helper functions.
+//
+
 static inline void integrate_clamp(struct vec *integral,
 	struct vec const *bound, struct vec const *value, float dt)
 {
@@ -25,6 +29,10 @@ static struct vec qzaxis(struct quat q)
 static float sign(float x) {
 	return (x >= 0.0f) ? 1.0f : -1.0f;
 }
+
+//
+// library functions, see quad_control.h for descriptions.
+//
 
 void quad_ctrl_default_params(struct quad_ctrl_params *params)
 {
@@ -61,6 +69,7 @@ void quad_ctrl_default_params(struct quad_ctrl_params *params)
 	*params = p;
 }
 
+
 void physical_params_crazyflie2(struct quad_physical_params *params)
 {
 	// from "System Identification of the Crazyflie 2.0 Nano Quadrocopter".
@@ -78,11 +87,13 @@ void physical_params_crazyflie2(struct quad_physical_params *params)
 	*params = p;
 }
 
+
 void quad_ctrl_init(struct quad_ctrl_state *state)
 {
 	state->int_linear_err = vzero();
 	state->int_attitude_err = vzero();
 }
+
 
 struct quad_accel quad_ctrl_full(
 	struct quad_ctrl_state *state,
@@ -106,6 +117,8 @@ struct quad_accel quad_ctrl_full(
 
 	// -------------------- Angular part --------------------
 	// construct the desired attitude, avoiding yaw singularity by using quats.
+	// TODO: we could carry yaw angle as a setpoint directly,
+	// so the user doesn't need to manually construct a quat setpoint
 	float const target_yaw = quat2rpy(set->quat).z;
 	struct quat q_yaw = qaxisangle(mkvec(0,0,1), target_yaw);
 	struct quat q_thrust = qvectovec(mkvec(0,0,1), vnormalize(target_thrust));
@@ -120,6 +133,7 @@ struct quad_accel quad_ctrl_full(
 	};
 	return output;
 }
+
 
 struct vec quad_ctrl_attitude(
 	struct quad_ctrl_state *state,
@@ -157,7 +171,6 @@ struct vec quad_ctrl_attitude(
 	// angle of yaw rotation
 	float const alpha_mix = quat2angle(q_mix);
 
-	// convert our PID-style params to time constant used in paper
 	float const yaw_priority = param->attitude.kp.z / param->attitude.kp.xy;
 
 	// if body yaw rate is high, we should prefer to do a yaw correction
@@ -186,6 +199,8 @@ struct vec quad_ctrl_attitude(
 	// final desired rotation
 	struct quat const q_err = qqmul(q_yaw, q_reduced);
 
+	// scale such that the desired angular acceleration for
+	// 90 degrees error is exactly params.angular.kp
 	float const scale = (2.0f / sqrtf(2.0f));
 	struct vec const moment = vadd(
 		vscl(param->attitude.kp.xy * scale, quatimagpart(qposreal(q_err))),
@@ -210,6 +225,7 @@ struct vec quad_ctrl_attitude_rate(
 	);
 	return moment;
 }
+
 
 void quad_power_distribute(
 	struct quad_accel const *acc,
