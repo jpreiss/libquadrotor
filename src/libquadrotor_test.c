@@ -51,12 +51,12 @@ struct quat randquat()
 #define RED(str) "\x1b[31m" str RESET
 #define GREEN(str) "\x1b[32m" str RESET
 
-char const *hrule = "------------------------------------------------------------";
+char const *hrule = "------------------------------------------------------------------";
 static char const *testname = NULL;
 void test(char const *name)
 {
 	if (testname != NULL) {
-		printf("%30s: " GREEN("passed") "\n", testname);
+		printf("%36s: " GREEN("passed") "\n", testname);
 	}
 	testname = name;
 }
@@ -69,7 +69,7 @@ void test_SE3_control()
 	quad_zero_state(&zero);
 	float const dt = 0.01;
 
-	test("go straight up");
+	test("SE3 ctrl straight up");
 	{
 		struct quad_ctrl_state ctrlstate;
 		quad_ctrl_init(&ctrlstate);
@@ -80,7 +80,7 @@ void test_SE3_control()
 		assert(acc.linear > params.linear.kp.z / 2.0f);
 	}
 
-	test("go forward");
+	test("SE3 ctrl forward");
 	{
 		struct quad_ctrl_state ctrlstate;
 		quad_ctrl_init(&ctrlstate);
@@ -100,7 +100,7 @@ void test_SE3_control()
 		assert(acc.linear > GRAV + 1.0f); // now, we should want to hold alt and move
 	}
 
-	test("go left");
+	test("SE3 ctrl left");
 	{
 		struct quad_ctrl_state ctrlstate;
 		quad_ctrl_init(&ctrlstate);
@@ -113,7 +113,7 @@ void test_SE3_control()
 		assert(close(acc.linear, GRAV)); // it should be dotted with the current up vec
 	}
 
-	test("yaw at hover");
+	test("SE3 ctrl yaw at hover");
 	{
 		struct quad_ctrl_state ctrlstate;
 		quad_ctrl_init(&ctrlstate);
@@ -127,7 +127,7 @@ void test_SE3_control()
 		assert(close(acc.linear, GRAV));
 	}
 
-	test("yaw singularity");
+	test("SE3 ctrl yaw singularity");
 	{
 		// this fails using the desired rot mtx from Mellinger's paper
 		// but succeeds with quaternions
@@ -647,6 +647,125 @@ void test_closedloop()
 	}
 }
 
+static struct quad_ekf ekf_repeat(struct quad_ekf const *init,
+	struct vec gyro, struct vec acc, float dt, int steps)
+{
+	struct quad_ekf ekfs[2] = { *init, *init };
+	for (int i = 0; i < steps; ++i) {
+		int back = i & 0x1;
+		quad_ekf_imu(&ekfs[back], &ekfs[!back], acc, gyro, dt);
+	}
+	return ekfs[steps & 0x1];
+}
+
+void test_ekf()
+{
+	struct quad_ekf ekf_zero;
+	quad_ekf_init(&ekf_zero, vzero(), vzero(), qeye());
+
+	test("EKF hover");
+	{
+		float dt = 0.01;
+		struct vec gyro = vzero();
+		struct vec accelerometer = mkvec(0, 0, GRAV);
+		struct quad_ekf final = ekf_repeat(&ekf_zero, gyro, accelerometer, dt, 100);
+		assert(vclose(final.state.pos, vzero()));
+		assert(vclose(final.state.vel, vzero()));
+		assert(vclose(final.state.acc, vzero()));
+		assert(qanglebetween(final.state.quat, qeye()) < 1e-6f);
+	}
+
+	test("EKF integral translate");
+	{
+		float dt = 0.001;
+		struct vec gyro = vzero();
+
+		srand(0);
+		int const TRIALS = 100;
+		for (int i = 0; i < TRIALS; ++i) {
+			struct vec dir = randvecbox(-1.0f, 1.0f);
+			struct vec accel = vadd(dir, mkvec(0, 0, GRAV));
+
+			int const steps = 100;
+			struct quad_ekf moving = ekf_repeat(&ekf_zero, gyro, accel, dt, steps);
+			float t = steps * dt;
+			// tolerance must be fairly loose due to discretization error
+			// (TODO: could we use Verlet integration in the EKF?)
+			assert(vcloseeps(moving.state.vel, vscl(t, dir), 1e-2));
+			assert(vcloseeps(moving.state.pos, vscl(0.5 * fsqr(t), dir), 1e-2));
+		}
+	}
+
+	test("EKF integral axis aligned rotate");
+	{
+		float dt = 0.001;
+		struct vec grav_world = mkvec(0, 0, GRAV);
+
+		srand(0);
+		int const TRIALS = 100;
+		int const steps = 100;
+
+		// the tolerances in this test need to be pretty loose
+		// because the ekf gyro update sacrifices accuracy
+		// to avoid trig functions.
+
+		for (int trial = 0; trial < TRIALS; ++trial) {
+			int const axis = rand() % 3;
+			float const max_speed = 10.0f;
+			assert(max_speed * steps * dt < M_PI_F);
+			float const speed = randu(-max_speed, max_speed);
+			if (fabs(speed) < 1e-2) continue;
+			float g[3] = { 0.0f, 0.0f, 0.0f };
+			g[axis] = speed;
+			struct vec gyro = vloadf(g);
+
+			struct quad_ekf ekfs[2] = { ekf_zero, ekf_zero };
+			for (int i = 0; i < steps; ++i) {
+				int back = i & 0x1;
+				struct quat q_world2body = qinv(ekfs[back].state.quat);
+				struct vec acc = qvrot(q_world2body, grav_world);
+				quad_ekf_imu(&ekfs[back], &ekfs[!back], acc, gyro, dt);
+			}
+			struct quad_ekf ekf_end = ekfs[steps & 0x1];
+			struct quat q = qposreal(ekf_end.state.quat);
+			struct vec q_axis = quat2axis(q);
+			float q_angle = quat2angle(q);
+			assert(q_angle > 0.0f);
+			assert(vclose(vnormalize(q_axis), vnormalize(gyro)));
+			assert(closeeps(q_angle, fabs(steps * dt * speed), 1e-2));
+		}
+	}
+
+	test("EKF variance grows");
+	{
+		float dt = 0.1;
+		struct vec gyro = vzero();
+		struct vec accelerometer = mkvec(0, 0, GRAV);
+		struct quad_ekf final = ekf_repeat(&ekf_zero, gyro, accelerometer, dt, 1000);
+		for (int i = 0; i < 6; ++i) {
+			assert(final.P[i][i] > 1.1f * ekf_zero.P[i][i]);
+		}
+		// gyro variance is much smaller
+		for (int i = 6; i < QUAD_EKF_N; ++i) {
+			assert(final.P[i][i] > 1.001f * ekf_zero.P[i][i]);
+		}
+	}
+
+	test("EKF update reduces variance");
+	{
+		float dt = 0.1;
+		struct vec gyro = vzero();
+		struct vec accelerometer = mkvec(0, 0, GRAV);
+		struct quad_ekf propagated = ekf_repeat(
+			&ekf_zero, gyro, accelerometer, dt, 100);
+		struct quad_ekf updated;
+		quad_ekf_fullstate(&propagated, &updated, vzero(), vzero(), qeye());
+		for (int i = 0; i < QUAD_EKF_N; ++i) {
+			assert(updated.P[i][i] < 0.1f * propagated.P[i][i]);
+		}
+	}
+}
+
 static void sigabort(int unused)
 {
 	puts(hrule);
@@ -667,10 +786,11 @@ int main()
 	test_powerdist();
 	test_dynamics();
 	test_closedloop();
+	test_ekf();
 
 	test("dummy");
 	puts(hrule);
-	puts(GREEN("libquadrotorcontrol: all tests passed."));
+	puts(GREEN("libquadrotor: all tests passed."));
 	puts("");
 	return 0;
 }

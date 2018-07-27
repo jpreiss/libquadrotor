@@ -38,7 +38,7 @@ void quad_ekf_init(struct quad_ekf *ekf, struct vec pos, struct vec vel, struct 
 void quad_ekf_imu(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
 	struct vec acc, struct vec gyro, float dt);
 
-void quad_ekf_fullpose(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
+void quad_ekf_fullstate(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
 	struct vec pos, struct vec vel, struct quat quat);
 
 // TODO: updates for GPS, UWB beacons, optical flow, compass, altitude estimator, ...

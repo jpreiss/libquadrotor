@@ -288,14 +288,14 @@ void quad_ekf_imu(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
 	//-------------------------- update covariance --------------------------//
 	// TODO should use old quat??
 	static float F[QUAD_EKF_N][QUAD_EKF_N];
-	dynamic_matrix(ekf->state.quat, omega, acc_imu, dt, F);
+	dynamic_matrix(ekf->state.quat, omega, acc, dt, F);
 
 	// Pnew = F P Ft + Q
 	static float PFt[QUAD_EKF_N][QUAD_EKF_N];
 	ZEROARR(PFt);
 	SGEMM2D('n', 't', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_N, 1.0, ekf_prev->P, F, 0.0, PFt);
 	SGEMM2D('n', 'n', QUAD_EKF_N, QUAD_EKF_N, QUAD_EKF_N, 1.0, F, PFt, 0.0, ekf->P);
-	addQ(dt, ekf->state.quat, omega, acc_imu, ekf->P);
+	addQ(dt, ekf->state.quat, omega, acc, ekf->P);
 	//symmetricize(ekf->P);
 }
 
