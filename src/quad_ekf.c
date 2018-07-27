@@ -267,26 +267,15 @@ void quad_ekf_imu(struct quad_ekf const *ekf_prev, struct quad_ekf *ekf,
 	struct vec acc, struct vec omega, float dt)
 {
 	//------------------------- integrate dynamics --------------------------//
-	// propagate constant states
-	//ekf->bias_acc = ekf_prev->bias_acc;
-	//ekf->bias_gyro = ekf_prev->bias_gyro;
 
 	// TODO TEMP avoid dumb bugs
 	*ekf = *ekf_prev;
 
-
-	// TODO follow S.Weiss and use means with the previous IMU measurements?
-	// or stick with the ultra-simple propagation here?
-	// (I think the means is not that helpful)
-
 	// propagate rotation
-	// TODO only normalize every N steps to save computation?
-	//struct vec const omega = vsub(vloadf(gyro), ekf->bias_gyro);
 	ekf->state.quat = qnormalize(quat_gyro_update(ekf_prev->state.quat, omega, dt));
 
 	// compute true acceleration
-	struct vec const acc_imu = acc;
-	struct vec acc_world = qvrot(ekf->state.quat, acc_imu);
+	struct vec acc_world = qvrot(ekf->state.quat, acc);
 	acc_world.z -= GRAV;
 
 	// propagate position + velocity
