@@ -4,10 +4,12 @@ dependency-free C implementations of quadrotor control, state estimation, and dy
 The current main components are:
 
  - Nonlinear trajectory tracking controller
+ - Nonlinear attitude tracking controller
  - Power distribution for "X" and "Plus" motor arrangements
  - First-order dynamics simulation
+ - Extended Kalman Filter (EKF) fusion of IMU with motion capture
 
-Possible future extensions include EKF state estimation, trajectory planning, more detailed physics model, power distribution for other kinds of multirotors, etc.
+Possible future extensions include EKF support for more types of sensors, trajectory planning, more detailed physics model, power distribution for other kinds of multirotors, etc.
 
 The goal of this project is to implement the core functions of quadrotor operation and simulation
 in a form that can be used both on the onboard flight controller and on a PC for testing, simulation, machine learning, etc.

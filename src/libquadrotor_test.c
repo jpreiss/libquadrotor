@@ -567,7 +567,7 @@ void test_closedloop()
 	struct quad_ctrl_params ctrl_params;
 	quad_ctrl_default_params(&ctrl_params);
 
-	test("hover attitude correction");
+	test("closed loop attitude correction");
 	{
 		srand(100);
 		struct quad_ctrl_state ctrl_state;
@@ -606,7 +606,7 @@ void test_closedloop()
 		}
 	}
 
-	test("hover position correction");
+	test("closed loop position correction");
 	{
 		srand(100);
 		struct quad_ctrl_state ctrl_state;
